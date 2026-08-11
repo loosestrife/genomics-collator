@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Barnyard</title>
+  <style>
+    body {
+      background-image: url('GBbackgroundimage.jpg');
+      background-size: cover;
+      background-attachment: fixed;
+      margin: 0;
+      min-height: 100vh;
+      font-family: sans-serif; 
+      display: flex; 
+      flex-direction: column; 
+      align-items: center; 
+      margin-top: 40px; 
+    }
+
+    /* Main wrapper to hold pen and barn side-by-side or stacked as needed */
+    .barnyard {
+      display: flex;
+      width: 90%;
+      max-width: 1200px;
+      gap: 30px;
+      align-items: flex-start;
+    }
+
+    /* Pen takes up 1/3 of the container width and displays 4 columns of images */
+    .pen {
+      width: 33.33%;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      background-color: rgba(255, 255, 255, 0.8);
+      padding: 15px;
+      border-radius: 8px;
+      box-sizing: border-box;
+    }
+
+    .pen img {
+      width: 100%;
+      aspect-ratio: 1;
+      object-fit: cover;
+      border-radius: 4px;
+      cursor: grab;
+    }
+
+    .barn {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .drop-zones {
+      display: flex;
+      gap: 20px;
+      margin-bottom: 10px;
+    }
+
+    .drop-zone { 
+      width: 210px; 
+      height: 200px; 
+      border: 2px dashed #007BFF; 
+      display: flex; 
+      flex-direction: column; 
+      align-items: center; 
+      justify-content: center; 
+      text-align: center; 
+      cursor: pointer; 
+      color: #007BFF; 
+      border-radius: 8px; 
+      padding: 10px; 
+      box-sizing: border-box; 
+      font-size: 14px; 
+      position: relative; 
+      overflow: hidden; 
+      background-color: #fff; 
+    }
+
+    /* Third Drop Zone specific styles: matches input box width (440px) and input text box height initially */
+    .drop-zone-wide {
+      width: 440px;
+      height: 48px; 
+      border: 2px dashed #007BFF; 
+      display: flex; 
+      flex-direction: column; 
+      align-items: center; 
+      justify-content: center; 
+      text-align: center; 
+      cursor: pointer; 
+      color: #007BFF; 
+      border-radius: 8px; 
+      padding: 10px; 
+      box-sizing: border-box; 
+      font-size: 14px; 
+      position: relative; 
+      overflow: hidden; 
+      background-color: #fff;
+      margin-bottom: 20px;
+      transition: height 0.3s ease, border-color 0.3s ease;
+    }
+
+    /* When file is dropped, pops out to match the height of the other zones (200px) */
+    .drop-zone-wide.expanded {
+      height: 200px;
+    }
+
+    .drop-zone.dragover, .drop-zone-wide.dragover { background-color: #82aed3; }
+    .drop-zone.has-file, .drop-zone-wide.has-file { border-color: #28a745; border-style: solid; }
+    
+    /* Thumbnail styles */
+    .thumb-preview { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+    .zone-text { z-index: 1; pointer-events: none; }
+    
+    /* Database Select & Search Input Container Styles */
+    .db-select-container, .search-container {
+      width: 440px;
+      margin-bottom: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .db-select-container label, .search-container label {
+      font-weight: bold;
+      font-size: 14px;
+      color: #333;
+    }
+
+    #databaseSelect, #searchInput {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 16px;
+      background-color: #fff;
+      box-sizing: border-box;
+    }
+
+    #databaseSelect {
+      cursor: pointer;
+    }
+
+    #sendBtn { width: 440px; padding: 15px; background-color: #007BFF; color: white; border: none; border-radius: 4px; font-size: 18px; font-weight: bold; cursor: pointer; margin-bottom: 20px; transition: background 0.2s; }
+    #sendBtn:hover { background-color: #0056b3; }
+    #sendBtn:disabled { background-color: #ccc; cursor: not-allowed; }
+
+    #response { width: 440px; min-height: 80px; padding: 10px; border: 1px solid #ccc; background: #f9f9f9; border-radius: 4px; white-space: pre-wrap; word-break: break-all; font-family: monospace; font-size: 12px; }
+  </style>
+</head>
+<body>
+
+  <div class="barnyard">
+    <div class="pen" id="penContainer"></div>
+
+    <div class="barn">
+      <div class="drop-zones">
+        <div class="drop-zone" id="zone1">
+          <span class="zone-text">Drop image 1 here or click</span>
+        </div>
+        <div class="drop-zone" id="zone2">
+          <span class="zone-text">Drop image 2 here or click</span>
+        </div>
+      </div>
+
+      <!--<div class="drop-zone-wide" id="zone3">
+        <span class="zone-text">Drop speciesX image here or click (Optional)</span>
+      </div>-->
+
+      <div class="db-select-container">
+        <label for="databaseSelect">Select Database:</label>
+        <select id="databaseSelect">
+          <option value="orthodb">orthodb</option>
+          <option value="ncbi">ncbi</option>
+        </select>
+      </div>
+
+      <div class="search-container">
+        <label for="searchInput">Search Query:</label>
+        <input type="text" id="searchInput" placeholder="Enter search term...">
+      </div>
+
+      <button id="sendBtn" disabled>Send Query</button>
+
+      <div id="response">Server response will show here...</div>
+    </div>
+  </div>
+
+  <input type="file" id="fileInput1" accept="image/*" style="display:none">
+  <input type="file" id="fileInput2" accept="image/*" style="display:none">
+  <!--<input type="file" id="fileInput3" accept="image/*" style="display:none">-->
+
+  <script>
+    const uploadedFiles = {
+      image1: null,
+      image2: null,
+      imageX: null,        // Represents speciesX (optional)
+      database: 'orthodb', 
+      search: ''           
+    };
+
+    // Update database payload property whenever selection changes
+    document.getElementById('databaseSelect').addEventListener('change', (e) => {
+      uploadedFiles.database = e.target.value;
+    });
+
+    // Update search payload property whenever input text changes
+    document.getElementById('searchInput').addEventListener('input', (e) => {
+      uploadedFiles.search = e.target.value;
+    });
+
+    function setupZone(zoneId, inputId, storageKey) {
+      const zone = document.getElementById(zoneId);
+      const input = document.getElementById(inputId);
+
+      zone.addEventListener('click', () => input.click());
+      zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('dragover'); });
+      zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+      
+      zone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        zone.classList.remove('dragover');
+
+        if (e.dataTransfer.files.length) {
+          processFile(e.dataTransfer.files[0], zone, storageKey);
+          return;
+        }
+
+        const imageSrc = e.dataTransfer.getData('text/plain');
+        if (imageSrc) {
+          processPenImage(imageSrc, zone, storageKey);
+        }
+      });
+
+      input.addEventListener('change', () => {
+        if (input.files.length) processFile(input.files[0], zone, storageKey);
+      });
+    }
+
+    // Handles files uploaded via standard file picker or OS drag-and-drop
+    function processFile(file, zoneElement, storageKey) {
+      if (!file.type.startsWith('image/')) {
+        document.getElementById('response').innerText = 'Error: Dropped file must be an image.';
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = function () {
+        uploadedFiles[storageKey] = {
+          fileName: file.name,
+          fileData: reader.result
+        };
+        updateZoneVisuals(zoneElement, reader.result);
+      };
+      reader.readAsDataURL(file);
+    }
+
+    // Handles images dragged from the .pen container
+    async function processPenImage(imageSrc, zoneElement, storageKey) {
+      try {
+        const fileName = imageSrc.split('/').pop();
+        uploadedFiles[storageKey] = {
+          fileName: fileName,
+          species: decodeURIComponent(fileName)
+            .split('.').slice(0,-1).join('.')
+            .split(' ').slice(0,2).join(' ')
+            .toLowerCase(),
+        };
+        updateZoneVisuals(zoneElement, imageSrc);
+      } catch (error) {
+        document.getElementById('response').innerText = `Error loading pen image: ${error.message}`;
+      }
+    }
+
+    // Helper to update zone UI with the thumbnail preview and trigger expansion for zone3
+    function updateZoneVisuals(zoneElement, dataUrl) {
+      zoneElement.classList.add('has-file');
+      
+      // If it's zone3, apply the expanded class to pop it out to full height
+      if (zoneElement.id === 'zone3') {
+        zoneElement.classList.add('expanded');
+      }
+      
+      const oldImg = zoneElement.querySelector('.thumb-preview');
+      if (oldImg) oldImg.remove();
+
+      const img = document.createElement('img');
+      img.src = dataUrl;
+      img.className = 'thumb-preview';
+      zoneElement.appendChild(img);
+
+      const textSpan = zoneElement.querySelector('.zone-text');
+      if (textSpan) textSpan.style.display = 'none';
+      
+      updateButtonState();
+    }
+
+    function updateButtonState() {
+      const sendBtn = document.getElementById('sendBtn');
+      // Button enables as long as image1 and image2 are present (image3 / speciesX is optional)
+      sendBtn.disabled = !(uploadedFiles.image1 && uploadedFiles.image2);
+    }
+
+    async function sendToServer() {
+      const res = document.getElementById('response');
+      const sendBtn = document.getElementById('sendBtn');
+      
+      res.innerText = "Sending payload to /orthologs...";
+      sendBtn.disabled = true;
+
+      try {
+        const response = await fetch('/orthologs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(uploadedFiles)
+        });
+
+        const isJson = response.headers.get('content-type')?.includes('application/json');
+        const data = isJson ? await response.json() : await response.text();
+
+        if (response.ok) {
+          res.innerText = typeof data === 'object' ? JSON.stringify(data, null, 2) : data;
+        } else {
+          res.innerText = `Server Error (${response.status}): ${typeof data === 'object' ? JSON.stringify(data) : data}`;
+        }
+      } catch (error) {
+        res.innerText = `Network Error: ${error.message}`;
+      } finally {
+        updateButtonState();
+      }
+    }
+
+    document.getElementById('sendBtn').addEventListener('click', sendToServer);
+
+    setupZone('zone1', 'fileInput1', 'image1');
+    setupZone('zone2', 'fileInput2', 'image2');
+    //setupZone('zone3', 'fileInput3', 'imageX'); 
+
+    function loadPenImages(imageList) {
+      const penDiv = document.getElementById('penContainer');
+      penDiv.innerHTML = ''; 
+
+      imageList.forEach(fileName => {
+        const img = document.createElement('img');
+        img.src = `pictures/${fileName}`;
+        img.alt = fileName.split('.').slice(0,-1).join('.');
+        
+        img.draggable = true;
+        img.addEventListener('dragstart', (e) => {
+          e.dataTransfer.setData('text/plain', img.src);
+        });
+
+        penDiv.appendChild(img);
+      });
+    }
+
+    fetch("pictures.json").then(x => x.json().then(
+      pictures => loadPenImages(pictures)
+    ));
+</script>
+</body>
+</html>
