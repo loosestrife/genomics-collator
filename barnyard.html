@@ -1,363 +1,666 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Barnyard</title>
-  <style>
-    body {
-      background-image: url('GBbackgroundimage.jpg');
-      background-size: cover;
-      background-attachment: fixed;
-      margin: 0;
-      min-height: 100vh;
-      font-family: sans-serif; 
-      display: flex; 
-      flex-direction: column; 
-      align-items: center; 
-      margin-top: 40px; 
-    }
+  <head>
+    <meta charset="UTF-8" />
+    <title>Barnyard</title>
+    <style>
+      body {
+        background-image: url("GBbackgroundimage.jpg");
+        background-size: cover;
+        background-attachment: fixed;
+        margin: 0;
+        min-height: 100vh;
+        font-family: sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        margin-top: 40px;
+      }
 
-    /* Main wrapper to hold pen and barn side-by-side or stacked as needed */
-    .barnyard {
-      display: flex;
-      width: 90%;
-      max-width: 1200px;
-      gap: 30px;
-      align-items: flex-start;
-    }
+      .barnyard {
+        display: flex;
+        width: 90%;
+        max-width: 1200px;
+        gap: 30px;
+        align-items: flex-start;
+      }
 
-    /* Pen takes up 1/3 of the container width and displays 4 columns of images */
-    .pen {
-      width: 33.33%;
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 10px;
-      background-color: rgba(255, 255, 255, 0.8);
-      padding: 15px;
-      border-radius: 8px;
-      box-sizing: border-box;
-    }
+      .pen {
+        width: 33.33%;
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+        background-color: rgba(255, 255, 255, 0.8);
+        padding: 15px;
+        border-radius: 8px;
+        box-sizing: border-box;
+      }
 
-    .pen img {
-      width: 100%;
-      aspect-ratio: 1;
-      object-fit: cover;
-      border-radius: 4px;
-      cursor: grab;
-    }
+      .pen-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+      }
 
-    .barn {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-    }
-    
-    .drop-zones {
-      display: flex;
-      gap: 20px;
-      margin-bottom: 10px;
-    }
+      .pen-item img {
+        width: 100%;
+        aspect-ratio: 1;
+        object-fit: cover;
+        border-radius: 4px;
+        cursor: grab;
+      }
 
-    .drop-zone { 
-      width: 210px; 
-      height: 200px; 
-      border: 2px dashed #007BFF; 
-      display: flex; 
-      flex-direction: column; 
-      align-items: center; 
-      justify-content: center; 
-      text-align: center; 
-      cursor: pointer; 
-      color: #007BFF; 
-      border-radius: 8px; 
-      padding: 10px; 
-      box-sizing: border-box; 
-      font-size: 14px; 
-      position: relative; 
-      overflow: hidden; 
-      background-color: #fff; 
-    }
+      .pen-filename {
+        font-size: 11px;
+        margin-top: 4px;
+        color: #333;
+        word-break: break-all;
+        line-height: 1.2;
+      }
 
-    /* Third Drop Zone specific styles: matches input box width (440px) and input text box height initially */
-    .drop-zone-wide {
-      width: 440px;
-      height: 48px; 
-      border: 2px dashed #007BFF; 
-      display: flex; 
-      flex-direction: column; 
-      align-items: center; 
-      justify-content: center; 
-      text-align: center; 
-      cursor: pointer; 
-      color: #007BFF; 
-      border-radius: 8px; 
-      padding: 10px; 
-      box-sizing: border-box; 
-      font-size: 14px; 
-      position: relative; 
-      overflow: hidden; 
-      background-color: #fff;
-      margin-bottom: 20px;
-      transition: height 0.3s ease, border-color 0.3s ease;
-    }
+      .barn {
+        background-image: url("barn.jpg");
+        background-size: 100% auto;
+        background-position: top center;
+        background-repeat: no-repeat;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+      }
 
-    /* When file is dropped, pops out to match the height of the other zones (200px) */
-    .drop-zone-wide.expanded {
-      height: 200px;
-    }
+      .drop-zones {
+        display: flex;
+        gap: 20px;
+        margin-bottom: 10px;
+        flex-wrap: wrap;
+      }
 
-    .drop-zone.dragover, .drop-zone-wide.dragover { background-color: #82aed3; }
-    .drop-zone.has-file, .drop-zone-wide.has-file { border-color: #28a745; border-style: solid; }
-    
-    /* Thumbnail styles */
-    .thumb-preview { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
-    .zone-text { z-index: 1; pointer-events: none; }
-    
-    /* Database Select & Search Input Container Styles */
-    .db-select-container, .search-container {
-      width: 440px;
-      margin-bottom: 10px;
-      display: flex;
-      flex-direction: column;
-      gap: 5px;
-    }
+      .drop-zone-wrapper {
+        display: flex;
+        flex-direction: column;
+      }
 
-    .db-select-container label, .search-container label {
-      font-weight: bold;
-      font-size: 14px;
-      color: #333;
-    }
+      .drop-zone {
+        width: 210px;
+        height: 200px;
+        border: 2px dashed #007bff;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        cursor: pointer;
+        color: #007bff;
+        border-radius: 8px;
+        padding: 10px;
+        box-sizing: border-box;
+        font-size: 14px;
+        position: relative;
+        overflow: hidden;
+        background-color: #fff;
+      }
 
-    #databaseSelect, #searchInput {
-      width: 100%;
-      padding: 10px;
-      border: 1px solid #ccc;
-      border-radius: 4px;
-      font-size: 16px;
-      background-color: #fff;
-      box-sizing: border-box;
-    }
+      /* Third Drop Zone specific styles: matches input box width (440px) and input text box height initially */
+      .drop-zone-wide {
+        width: 440px;
+        height: 48px;
+        border: 2px dashed #007bff;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        cursor: pointer;
+        color: #007bff;
+        border-radius: 8px;
+        padding: 10px;
+        box-sizing: border-box;
+        font-size: 14px;
+        position: relative;
+        overflow: hidden;
+        background-color: #fff;
+        transition:
+          height 0.3s ease,
+          border-color 0.3s ease;
+      }
 
-    #databaseSelect {
-      cursor: pointer;
-    }
+      .drop-zone-input {
+        width: 100%;
+        height: 38px;
+        padding: 8px 10px;
+        box-sizing: border-box;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        font-family: inherit;
+        font-size: 13px;
+      }
 
-    #sendBtn { width: 440px; padding: 15px; background-color: #007BFF; color: white; border: none; border-radius: 4px; font-size: 18px; font-weight: bold; cursor: pointer; margin-bottom: 20px; transition: background 0.2s; }
-    #sendBtn:hover { background-color: #0056b3; }
-    #sendBtn:disabled { background-color: #ccc; cursor: not-allowed; }
+      .drop-zone.dragover {
+        background-color: #82aed3;
+      }
+      .drop-zone.has-file {
+        border-color: #28a745;
+        border-style: solid;
+      }
 
-    #response { width: 440px; min-height: 80px; padding: 10px; border: 1px solid #ccc; background: #f9f9f9; border-radius: 4px; white-space: pre-wrap; word-break: break-all; font-family: monospace; font-size: 12px; }
-  </style>
-</head>
-<body>
+      .thumb-preview {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        pointer-events: none;
+      }
+      .zone-text {
+        z-index: 1;
+        pointer-events: none;
+      }
 
-  <div class="barnyard">
-    <div class="pen" id="penContainer"></div>
+      .db-select-container,
+      .search-container {
+        width: 440px;
+        margin-bottom: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
 
-    <div class="barn">
-      <div class="drop-zones">
-        <div class="drop-zone" id="zone1">
-          <span class="zone-text">Drop image 1 here or click</span>
+      .db-select-container label,
+      .search-container label {
+        font-weight: bold;
+        font-size: 14px;
+        color: #333;
+      }
+
+      #databaseSelect,
+      #searchInput {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        font-size: 16px;
+        background-color: #fff;
+        box-sizing: border-box;
+      }
+
+      #databaseSelect {
+        cursor: pointer;
+      }
+
+      #sendBtn {
+        width: 440px;
+        padding: 15px;
+        background-color: #007bff;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        font-size: 18px;
+        font-weight: bold;
+        cursor: pointer;
+        margin-bottom: 20px;
+        transition: background 0.2s;
+      }
+      #sendBtn:hover {
+        background-color: #0056b3;
+      }
+      #sendBtn:disabled {
+        background-color: #ccc;
+        cursor: not-allowed;
+      }
+
+      #response {
+        width: 440px;
+        min-height: 80px;
+        padding: 10px;
+        border: 1px solid #ccc;
+        background: #f9f9f9;
+        border-radius: 4px;
+        white-space: pre-wrap;
+        word-break: break-all;
+        font-family: monospace;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="barnyard">
+      <div class="pen" id="penContainer"></div>
+
+      <div class="barn">
+        <!-- Dynamic container for drop zone wrappers -->
+        <div class="drop-zones" id="zones"></div>
+
+        <div class="db-select-container">
+          <label for="databaseSelect">Select Database:</label>
+          <select id="databaseSelect">
+            <option value="orthodb">orthodb</option>
+            <option value="ncbi">ncbi</option>
+          </select>
         </div>
-        <div class="drop-zone" id="zone2">
-          <span class="zone-text">Drop image 2 here or click</span>
+
+        <div class="search-container">
+          <label for="searchInput">Search Query:</label>
+          <input
+            type="text"
+            id="searchInput"
+            placeholder="Enter search term..."
+          />
+        </div>
+
+        <button id="sendBtn" disabled>Send Query</button>
+
+        <div>
+          <input type="checkbox" id="collapseOrthogroupsCheckbox"/><label>Collapse Orthogroups</label>
+          <div id="response">Server response will show here...</div>
         </div>
       </div>
-
-      <!--<div class="drop-zone-wide" id="zone3">
-        <span class="zone-text">Drop speciesX image here or click (Optional)</span>
-      </div>-->
-
-      <div class="db-select-container">
-        <label for="databaseSelect">Select Database:</label>
-        <select id="databaseSelect">
-          <option value="orthodb">orthodb</option>
-          <option value="ncbi">ncbi</option>
-        </select>
-      </div>
-
-      <div class="search-container">
-        <label for="searchInput">Search Query:</label>
-        <input type="text" id="searchInput" placeholder="Enter search term...">
-      </div>
-
-      <button id="sendBtn" disabled>Send Query</button>
-
-      <div id="response">Server response will show here...</div>
     </div>
-  </div>
 
-  <input type="file" id="fileInput1" accept="image/*" style="display:none">
-  <input type="file" id="fileInput2" accept="image/*" style="display:none">
-  <!--<input type="file" id="fileInput3" accept="image/*" style="display:none">-->
+    <script>
+      // Lightweight DOM creation helper
+      const html = ["div", "span", "input"].reduce((acc, tag) => {
+        acc[tag] = (props = {}, children = []) => {
+          const el = document.createElement(tag);
+          Object.entries(props).forEach(([k, v]) => {
+            if (k === "class") el.className = v;
+            else el[k] = v;
+          });
+          (Array.isArray(children) ? children : [children]).forEach((c) => {
+            if (c)
+              el.appendChild(
+                typeof c === "string" ? document.createTextNode(c) : c,
+              );
+          });
+          return el;
+        };
+        return acc;
+      }, {});
 
-  <script>
-    const uploadedFiles = {
-      image1: null,
-      image2: null,
-      imageX: null,        // Represents speciesX (optional)
-      database: 'orthodb', 
-      search: ''           
-    };
+      const uploadedFiles = {
+        image1: null,
+        image2: null,
+        imageX: null,
+        database: "orthodb",
+        search: "",
+      };
 
-    // Update database payload property whenever selection changes
-    document.getElementById('databaseSelect').addEventListener('change', (e) => {
-      uploadedFiles.database = e.target.value;
-    });
+function collapseOrthogroups(dbResults) {
+  if (!dbResults) return {};
+  
+  const stopWords = new Set([
+    'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from',
+    'has', 'he', 'in', 'is', 'it', 'its', 'of', 'on', 'that', 'the',
+    'to', 'was', 'were', 'will', 'with', 'protein',
+    'isoform', 'like', 'type', 'putative', 'member', 'family'
+  ]);
 
-    // Update search payload property whenever input text changes
-    document.getElementById('searchInput').addEventListener('input', (e) => {
-      uploadedFiles.search = e.target.value;
-    });
-
-    function setupZone(zoneId, inputId, storageKey) {
-      const zone = document.getElementById(zoneId);
-      const input = document.getElementById(inputId);
-
-      zone.addEventListener('click', () => input.click());
-      zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('dragover'); });
-      zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+  const processed = {};
+  for (const [ogId, speciesMap] of Object.entries(dbResults)) {
+    const wordCounts = {};
+    const speciesCounts = [];
+    
+    Object.entries(speciesMap).forEach(([speciesName, genes], i) => {
+      if (!Array.isArray(genes)) return;
+      speciesCounts[i] = genes.length;
       
-      zone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        zone.classList.remove('dragover');
+      for (const gene of genes) {
+        if (!gene.description) continue;
 
-        if (e.dataTransfer.files.length) {
-          processFile(e.dataTransfer.files[0], zone, storageKey);
+        const words = gene.description
+          .toLowerCase()
+          .replace(/[^a-z0-9\s-]/g, ' ')
+          .split(/\s+/);
+
+        for (const word of words) {
+          if (word.length > 2 && !stopWords.has(word) && isNaN(word)) {
+            wordCounts[word] = (wordCounts[word] || 0) + 1;
+          }
+        }
+      }
+    });
+
+    const sortedWords = Object.entries(wordCounts)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([word]) => word);
+
+    const summaryText = `(${speciesCounts.join(', ')}) ` + (
+      sortedWords.length > 0 ? sortedWords.join(', ') : 'No descriptive terms found'
+    );
+
+    processed[ogId] = {
+      summary: summaryText,
+      raw: speciesMap
+    };
+  }
+
+  return processed;
+}
+
+
+
+const renderCurrentData = () => {
+  if (!window.currentData || !window.currentData.dbResults) return;
+  const res = document.getElementById('response');
+  res.innerHTML = ''; // Clear previous text output
+
+  const globalCollapsed = document.getElementById('collapseOrthogroupsCheckbox').checked;
+
+  if (!globalCollapsed) {
+    // Show raw JSON output as normal
+    const pre = document.createElement('pre');
+    pre.textContent = JSON.stringify(window.currentData, null, 2);
+    res.appendChild(pre);
+    return;
+  }
+
+  // Generate collapsed summaries with individual toggle checkboxes
+  const collapsedData = collapseOrthogroups(window.currentData.dbResults);
+
+  const container = document.createElement('div');
+  container.style.display = 'flex';
+  container.style.flexDirection = 'column';
+  container.style.gap = '12px';
+
+  for (const [ogId, { summary, raw }] of Object.entries(collapsedData)) {
+    const card = document.createElement('div');
+    card.style.border = '1px solid #ddd';
+    card.style.borderRadius = '4px';
+    card.style.padding = '8px';
+    card.style.backgroundColor = '#fff';
+
+    // Header row with Orthogroup ID and Uncollapse checkbox
+    const header = document.createElement('div');
+    header.style.display = 'flex';
+    header.style.alignItems = 'center';
+    header.style.gap = '10px';
+    header.style.marginBottom = '6px';
+
+    const title = document.createElement('strong');
+    title.textContent = ogId;
+
+    const label = document.createElement('label');
+    label.style.fontSize = '11px';
+    label.style.cursor = 'pointer';
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.style.marginRight = '4px';
+
+    label.appendChild(checkbox);
+    label.appendChild(document.createTextNode('Uncollapse this'));
+
+    header.appendChild(title);
+    header.appendChild(label);
+
+    // Content container (Summary view vs Raw JSON view)
+    const content = document.createElement('div');
+    content.className = 'og-content';
+    content.textContent = summary;
+
+    // Toggle content view on checkbox change
+    checkbox.addEventListener('change', (e) => {
+      if (e.target.checked) {
+        content.innerHTML = `<pre style="margin: 0; font-size: 11px; white-space: pre-wrap;">${JSON.stringify(raw, null, 2)}</pre>`;
+      } else {
+        content.textContent = summary;
+      }
+    });
+
+    card.appendChild(header);
+    card.appendChild(content);
+    container.appendChild(card);
+  }
+
+  res.appendChild(container);
+};
+
+
+      window.onload = () => {
+        const zonesContainer = document.getElementById("zones");
+
+        [1, 2, /*"X"*/].forEach((n) => {
+          const storageKey = "image" + n;
+          const isOptional = n === "X";
+
+          const fileInput = html.input({
+            type: "file",
+            id: "fileInput" + n,
+            accept: "image/*",
+            style: "display:none",
+          });
+
+          const textInput = html.input({
+            type: "text",
+            class: "drop-zone-input",
+            id: "textInput" + n,
+            placeholder: `Species ${n} name or drop image...`,
+          });
+
+          const dropZone = html.div(
+            {
+              class: n == "X" ? "drop-zone-wide" : "drop-zone",
+              id: "zone" + n,
+            },
+            [
+              html.span({ class: "zone-text" }, [
+                `Drop image ${n} here${isOptional ? " (Optional)" : ""} or click`,
+              ]),
+            ],
+          );
+
+          zonesContainer.appendChild(
+            html.div({ class: "drop-zone-wrapper" }, [
+              dropZone,
+              textInput,
+              fileInput,
+            ]),
+          );
+
+          setupZone(dropZone, fileInput, textInput, storageKey);
+        });
+
+        // Load pen images from pictures.json
+        fetch("pictures.json")
+          .then((x) => x.json())
+          .then((pictures) => loadPenImages(pictures))
+          .catch((err) => console.error("Could not load pictures.json:", err));
+      };
+
+      document
+        .getElementById("databaseSelect")
+        .addEventListener("change", (e) => {
+          uploadedFiles.database = e.target.value;
+        });
+
+      document.getElementById("searchInput").addEventListener("input", (e) => {
+        uploadedFiles.search = e.target.value;
+      });
+
+      function setupZone(zone, fileInput, textInput, storageKey) {
+        zone.addEventListener("click", () => fileInput.click());
+        zone.addEventListener("dragover", (e) => {
+          e.preventDefault();
+          zone.classList.add("dragover");
+        });
+        zone.addEventListener("dragleave", () =>
+          zone.classList.remove("dragover"),
+        );
+
+        zone.addEventListener("drop", (e) => {
+          e.preventDefault();
+          zone.classList.remove("dragover");
+
+          if (e.dataTransfer.files.length) {
+            processFile(e.dataTransfer.files[0], zone, textInput, storageKey);
+            return;
+          }
+
+          const imageSrc = e.dataTransfer.getData("text/plain");
+          if (imageSrc) {
+            processPenImage(imageSrc, zone, textInput, storageKey);
+          }
+        });
+
+        fileInput.addEventListener("change", () => {
+          if (fileInput.files.length)
+            processFile(fileInput.files[0], zone, textInput, storageKey);
+        });
+
+        textInput.addEventListener("input", () => {
+          clearZoneVisuals(zone);
+
+          if (!uploadedFiles[storageKey]) {
+            uploadedFiles[storageKey] = {};
+          }
+          uploadedFiles[storageKey].species = textInput.value;
+          uploadedFiles[storageKey].fileData = null;
+
+          updateButtonState();
+        });
+      }
+
+      function processFile(file, zoneElement, textInputElement, storageKey) {
+        if (!file.type.startsWith("image/")) {
+          document.getElementById("response").innerText =
+            "Error: Dropped file must be an image.";
           return;
         }
 
-        const imageSrc = e.dataTransfer.getData('text/plain');
-        if (imageSrc) {
-          processPenImage(imageSrc, zone, storageKey);
-        }
-      });
-
-      input.addEventListener('change', () => {
-        if (input.files.length) processFile(input.files[0], zone, storageKey);
-      });
-    }
-
-    // Handles files uploaded via standard file picker or OS drag-and-drop
-    function processFile(file, zoneElement, storageKey) {
-      if (!file.type.startsWith('image/')) {
-        document.getElementById('response').innerText = 'Error: Dropped file must be an image.';
-        return;
-      }
-
-      const reader = new FileReader();
-      reader.onload = function () {
-        uploadedFiles[storageKey] = {
-          fileName: file.name,
-          fileData: reader.result
+        const reader = new FileReader();
+        reader.onload = function () {
+          uploadedFiles[storageKey] = {
+            fileName: file.name,
+            fileData: reader.result,
+          };
+          updateZoneVisuals(zoneElement, reader.result);
         };
-        updateZoneVisuals(zoneElement, reader.result);
-      };
-      reader.readAsDataURL(file);
-    }
-
-    // Handles images dragged from the .pen container
-    async function processPenImage(imageSrc, zoneElement, storageKey) {
-      try {
-        const fileName = imageSrc.split('/').pop();
-        uploadedFiles[storageKey] = {
-          fileName: fileName,
-          species: decodeURIComponent(fileName)
-            .split('.').slice(0,-1).join('.')
-            .split(' ').slice(0,2).join(' ')
-            .toLowerCase(),
-        };
-        updateZoneVisuals(zoneElement, imageSrc);
-      } catch (error) {
-        document.getElementById('response').innerText = `Error loading pen image: ${error.message}`;
+        reader.readAsDataURL(file);
       }
-    }
 
-    // Helper to update zone UI with the thumbnail preview and trigger expansion for zone3
-    function updateZoneVisuals(zoneElement, dataUrl) {
-      zoneElement.classList.add('has-file');
-      
-      // If it's zone3, apply the expanded class to pop it out to full height
-      if (zoneElement.id === 'zone3') {
-        zoneElement.classList.add('expanded');
-      }
-      
-      const oldImg = zoneElement.querySelector('.thumb-preview');
-      if (oldImg) oldImg.remove();
+      async function processPenImage(
+        imageSrc,
+        zoneElement,
+        textInputElement,
+        storageKey,
+      ) {
+        try {
+          const fileName = imageSrc.split("/").pop();
+          const decodedName = decodeURIComponent(fileName);
+          const scientificName = stripExtension(decodedName).split(' ').slice(0,2).join(' ');
+          uploadedFiles[storageKey] = {
+            fileName: fileName,
+            fileData: imageSrc,
+            species: scientificName,
+          };
 
-      const img = document.createElement('img');
-      img.src = dataUrl;
-      img.className = 'thumb-preview';
-      zoneElement.appendChild(img);
-
-      const textSpan = zoneElement.querySelector('.zone-text');
-      if (textSpan) textSpan.style.display = 'none';
-      
-      updateButtonState();
-    }
-
-    function updateButtonState() {
-      const sendBtn = document.getElementById('sendBtn');
-      // Button enables as long as image1 and image2 are present (image3 / speciesX is optional)
-      sendBtn.disabled = !(uploadedFiles.image1 && uploadedFiles.image2);
-    }
-
-    async function sendToServer() {
-      const res = document.getElementById('response');
-      const sendBtn = document.getElementById('sendBtn');
-      
-      res.innerText = "Sending payload to /orthologs...";
-      sendBtn.disabled = true;
-
-      try {
-        const response = await fetch('/orthologs', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(uploadedFiles)
-        });
-
-        const isJson = response.headers.get('content-type')?.includes('application/json');
-        const data = isJson ? await response.json() : await response.text();
-
-        if (response.ok) {
-          res.innerText = typeof data === 'object' ? JSON.stringify(data, null, 2) : data;
-        } else {
-          res.innerText = `Server Error (${response.status}): ${typeof data === 'object' ? JSON.stringify(data) : data}`;
+          textInputElement.value = scientificName;
+          updateZoneVisuals(zoneElement, imageSrc);
+        } catch (error) {
+          document.getElementById("response").innerText =
+            `Error loading pen image: ${error.message}`;
         }
-      } catch (error) {
-        res.innerText = `Network Error: ${error.message}`;
-      } finally {
+      }
+
+      function updateZoneVisuals(zoneElement, dataUrl) {
+        zoneElement.classList.add("has-file");
+
+        const oldImg = zoneElement.querySelector(".thumb-preview");
+        if (oldImg) oldImg.remove();
+
+        const img = document.createElement("img");
+        img.src = dataUrl;
+        img.className = "thumb-preview";
+        zoneElement.appendChild(img);
+
+        const textSpan = zoneElement.querySelector(".zone-text");
+        if (textSpan) textSpan.style.display = "none";
+
         updateButtonState();
       }
-    }
 
-    document.getElementById('sendBtn').addEventListener('click', sendToServer);
+      function clearZoneVisuals(zoneElement) {
+        zoneElement.classList.remove("has-file");
+        const oldImg = zoneElement.querySelector(".thumb-preview");
+        if (oldImg) oldImg.remove();
 
-    setupZone('zone1', 'fileInput1', 'image1');
-    setupZone('zone2', 'fileInput2', 'image2');
-    //setupZone('zone3', 'fileInput3', 'imageX'); 
+        const textSpan = zoneElement.querySelector(".zone-text");
+        if (textSpan) textSpan.style.display = "block";
+      }
 
-    function loadPenImages(imageList) {
-      const penDiv = document.getElementById('penContainer');
-      penDiv.innerHTML = ''; 
+      function updateButtonState() {
+        const sendBtn = document.getElementById("sendBtn");
 
-      imageList.forEach(fileName => {
-        const img = document.createElement('img');
-        img.src = `pictures/${fileName}`;
-        img.alt = fileName.split('.').slice(0,-1).join('.');
-        
-        img.draggable = true;
-        img.addEventListener('dragstart', (e) => {
-          e.dataTransfer.setData('text/plain', img.src);
+        const valid1 =
+          uploadedFiles.image1 &&
+          (uploadedFiles.image1.fileData ||
+              uploadedFiles.image1.species);
+        const valid2 =
+          uploadedFiles.image2 &&
+          (uploadedFiles.image2.fileData ||
+            uploadedFiles.image2.species);
+
+        sendBtn.disabled = !(valid1 && valid2);
+      }
+
+      async function sendToServer() {
+        const res = document.getElementById("response");
+        const sendBtn = document.getElementById("sendBtn");
+
+        res.innerText = "Sending payload to /orthologs...";
+        sendBtn.disabled = true;
+
+        try {
+          const response = await fetch("/orthologs", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(uploadedFiles),
+          });
+
+          const isJson = response.headers
+            .get("content-type")
+            ?.includes("application/json");
+          const data = isJson ? await response.json() : await response.text();
+
+          if (response.ok) {
+            window.currentData = data;
+            renderCurrentData();
+          } else {
+            res.innerText = `Server Error (${response.status}): ${typeof data === "object" ? JSON.stringify(data) : data}`;
+          }
+        } catch (error) {
+          res.innerText = `Network Error: ${error.message}`;
+        }
+      }
+
+      document
+        .getElementById("sendBtn")
+        .addEventListener("click", sendToServer);
+
+      function loadPenImages(imageList) {
+        const penDiv = document.getElementById("penContainer");
+        penDiv.innerHTML = "";
+
+        imageList.forEach((fileName) => {
+          const img = html.input ? document.createElement("img") : null;
+          img.src = `pictures/${fileName}`;
+          img.alt = fileName.split(".").slice(0, -1).join(".");
+          img.draggable = true;
+          img.addEventListener("dragstart", (e) => {
+            e.dataTransfer.setData("text/plain", img.src);
+          });
+
+          //const label = html.span({ class: "pen-filename" }, [fileName]);
+          const item = html.div({ class: "pen-item" }, [img, /*label*/]);
+
+          penDiv.appendChild(item);
         });
+      }
 
-        penDiv.appendChild(img);
-      });
-    }
-
-    fetch("pictures.json").then(x => x.json().then(
-      pictures => loadPenImages(pictures)
-    ));
-</script>
-</body>
+      function stripExtension(n){
+        return n.split('.').slice(0,-1).join('.');
+      }
+    </script>
+  </body>
 </html>

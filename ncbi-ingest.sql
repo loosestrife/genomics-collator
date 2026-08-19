@@ -8,7 +8,7 @@ SELECT
     REGEXP_REPLACE(column1, '^[[:space:]]+|[[:space:]]+$', '', 'g') AS name,
     REGEXP_REPLACE(column3, '^[[:space:]]+|[[:space:]]+$', '', 'g') AS name_class
 FROM read_csv(
-    'names.dmp', 
+    'data/names.dmp', 
     header = false, 
     delim = '|', 
     quote = '', 
@@ -27,7 +27,7 @@ SELECT
     column08 AS description
 FROM (
     SELECT * FROM read_csv(
-        'gene_info.gz', 
+        'data/gene_info.gz', 
         header = false, 
         delim = '\t', 
         quote = '', 
@@ -47,7 +47,7 @@ SELECT
     CAST(column4 AS UBIGINT) AS gene_id_2
 FROM (
     SELECT * FROM read_csv(
-        'gene_orthologs.gz', 
+        'data/gene_orthologs.gz', 
         header = false, 
         delim = '\t', 
         quote = '', 
@@ -64,7 +64,7 @@ SELECT
     CAST(column01 AS INTEGER) AS parent_tax_id,
     REGEXP_REPLACE(column02, '^[[:space:]]+|[[:space:]]+$', '', 'g') AS rank
 FROM read_csv(
-    'nodes.dmp', 
+    'data/nodes.dmp', 
     header = false, 
     delim = '|', 
     quote = '', 

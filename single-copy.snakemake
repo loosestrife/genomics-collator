@@ -1,0 +1,103 @@
+import os
+
+# Target rule: The final output is the treePL dated chronogram
+rule all:
+    input:
+        "single-copy-chronogram.tre"
+
+# Step 1: Extract ortholog IDs from DuckDB
+rule extract_orthologs:
+    input:
+        db="orthodb.duckdb",
+        sql="single-copy-extract.sql"
+    output:
+        "single_copy_orthologs.csv"
+    shell:
+        """
+        duckdb {input.db} < {input.sql}
+        """
+
+# Step 2: Checkpoint to fetch FASTAs dynamically
+checkpoint fetch_fastas:
+    input:
+        csv="single_copy_orthologs.csv",
+        script="single-copy-fastas.py"
+    output:
+        dir=directory("fastas")
+    shell:
+        """
+        python {input.script}
+        """
+
+# Input function to dynamically collect sample IDs AFTER checkpoint completes
+def get_trimmed_files(wildcards):
+    checkpoint_output = checkpoints.fetch_fastas.get(**wildcards).output[0]
+    SAMPLES, = glob_wildcards(os.path.join(checkpoint_output, "{sample}.fa"))
+    return expand("trimmed/{sample}_trimmed.fa", sample=SAMPLES)
+
+# Step 3: Align sequences with MAFFT
+rule align:
+    input:
+        "fastas/{sample}.fa"
+    output:
+        "aligned/{sample}_aligned.fa"
+    threads: 1
+    shell:
+        """
+        mafft --anysymbol --thread {threads} --auto --quiet {input} > {output}
+        """
+
+# Step 4: Trim poorly aligned regions with trimAl
+rule trim:
+    input:
+        "aligned/{sample}_aligned.fa"
+    output:
+        "trimmed/{sample}_trimmed.fa"
+    shell:
+        """
+        trimal -in {input} -out {output} -automated1
+        """
+
+# Step 5: Concatenate trimmed alignments into a padded supermatrix with AMAS
+rule concat:
+    input:
+        get_trimmed_files
+    output:
+        matrix="single-copy-supermatrix.fasta",
+        partitions="single-copy-partitions.txt"
+    shell:
+        """
+        AMAS.py concat -i {input} -f fasta -d aa -u fasta -t {output.matrix} -p {output.partitions}
+        """
+
+# Step 6: Build phylogenetic tree with IQ-TREE
+rule iqtree:
+    input:
+        matrix="single-copy-supermatrix.fasta",
+        partitions="single-copy-partitions.txt"
+    output:
+        tree="single-copy-supermatrix.txt.treefile",
+        iqtree="single-copy-supermatrix.txt.iqtree"
+    threads: 12
+    shell:
+        """
+        # Ensure RAxML-style partitions have the required model prefix for IQ-TREE
+        sed -i 's/^/LG, /' {input.partitions}
+        
+        iqtree -s {input.matrix} -p {input.partitions} -bb 1000 -nt {threads} -safe
+        """
+
+# Step 7: Estimate divergence times with treePL
+rule treepl:
+    input:
+        tree="single-copy-supermatrix.txt.treefile",
+        config="single-copy-rate-calibration.config"
+    output:
+        chronogram="single-copy-chronogram.tre"
+    threads: 4
+    shell:
+        """
+        # Ensure treePL reads the correct input tree and outputs to the expected file
+        # (Make sure your config file specifies `treefile` and `outfiles` accordingly)
+        treePL {input.config}
+        """

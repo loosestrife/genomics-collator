@@ -1,3 +1,5 @@
+from collections import defaultdict
+from numpy import object_
 import os
 import traceback
 from typing import List, Optional
@@ -15,198 +17,465 @@ app = FastAPI(title="NCBI Orthologs FastAPI Server")
 NCBI_DB_PATH="../ncbi.duckdb"
 ORTHODB_DB_PATH="../orthodb.duckdb"
 
-def getOrthologs(species1: str, species2: str, search_query: str, limit: int, conn: duckdb.DuckDBPyConnection):
-    print('getOrthologs', species1, species2)
-    ORTHODB_DB_QUERY = """
-    WITH species_a_proteins AS (
-        SELECT 
-          g.og_level, 
-          g.locus_tag AS locus_tag_a,
-          g.replicon AS replicon_a,
-          og.og_id
-        FROM species s
-        JOIN genes g ON s.species_code = g.species_code
-        JOIN og2genes og ON g.og_level = og.protein_id
-        WHERE s.species_name = ?
-    ),
-    species_b_proteins AS (
-        SELECT 
-          g.og_level, 
-          g.locus_tag AS locus_tag_b,
-          g.replicon AS replicon_b,
-          g.description,
-          og.og_id,
-          s.species_name
-        FROM species s
-        JOIN genes g ON s.species_code = g.species_code
-        JOIN og2genes og ON g.og_level = og.protein_id
-        WHERE s.species_name = ?
-    ),
-    base_query AS (
-        SELECT DISTINCT ON (ap.locus_tag_a, bp.locus_tag_b)
-          ? AS species_a,
-          ap.locus_tag_a,
-          ap.og_level AS protein_id_a,
-          ap.replicon_a,
-          ap.og_id AS orthologous_group,
-          bp.locus_tag_b,
-          bp.og_level AS protein_id_b,
-          bp.replicon_b,
-          bp.description AS description_b,
-          bp.species_name AS species_b
-        FROM species_a_proteins ap
-        JOIN species_b_proteins bp ON ap.og_id = bp.og_id
-    )
-    SELECT * FROM base_query
-    WHERE 
-        ? = '' OR 
-        CAST(species_a AS VARCHAR) ILIKE ? OR
-        CAST(locus_tag_a AS VARCHAR) ILIKE ? OR
-        CAST(protein_id_a AS VARCHAR) ILIKE ? OR
-        CAST(replicon_a AS VARCHAR) ILIKE ? OR
-        CAST(orthologous_group AS VARCHAR) ILIKE ? OR
-        CAST(locus_tag_b AS VARCHAR) ILIKE ? OR
-        CAST(protein_id_b AS VARCHAR) ILIKE ? OR
-        CAST(replicon_b AS VARCHAR) ILIKE ? OR
-        CAST(description_b AS VARCHAR) ILIKE ? OR
-        CAST(species_b AS VARCHAR) ILIKE ?
-    ORDER BY replicon_a
-    LIMIT ?;
+from collections import defaultdict
+import duckdb
+
+from collections import defaultdict
+import duckdb
+
+def odb_mrca(
+    conn: duckdb.DuckDBPyConnection, 
+    species1: str, 
+    species2: str, 
+    sdata_lineage: list[tuple[int, str]] | list[str],
+    tid2name: dict[int, str]
+) -> tuple[int, str]:
     """
-    # Parameters mapping:
-    # 1, 2: Species names for CTEs
-    # 3: Species A label for SELECT
-    # 4: Empty check for search (? = '')
-    # 5-14: ILIKE patterns for each of the 10 output columns
-    # 15: LIMIT value
-    search_pattern = "%"+search_query+"%"
-    params = [
-        species1, species2, species1, 
-        search_query, 
-        search_pattern, search_pattern, search_pattern, search_pattern, 
-        search_pattern, search_pattern, search_pattern, search_pattern, 
-        search_pattern, search_pattern, 
-        limit
-    ]
-    cursor = conn.execute(ORTHODB_DB_QUERY, params)
+    Finds the most specific OrthoDB clade TaxID shared by two species by 
+    matching against the ordered NCBI lineage tree.
+    """
+    # 1. Option A: Fast check using the `lineage` array in level2species
+    l2s_array_query = """
+        SELECT DISTINCT UNNEST(l1.lineage) AS level_tax_id
+        FROM level2species l1
+        JOIN species s1 ON l1.species_code = s1.species_code
+        JOIN level2species l2 ON l1.species_code = s2.species_code
+        JOIN species s2 ON s1.species_code != s2.species_code
+        WHERE s1.species_name = $species1
+          AND s2.species_name = $species2;
+    """
+    
+    # 2. Option B: Check og2genes (Fixed query alias: og1.og_id instead of og.og_id)
+    og_levels_query = """
+        SELECT DISTINCT 
+            CAST(regexp_extract(og1.og_id, 'at([0-9]+)$', 1) AS INTEGER) AS level_tax_id
+        FROM species s1
+        JOIN genes g1 ON s1.species_code = g1.species_code
+        JOIN og2genes og1 ON g1.odb_gene_id = og1.protein_id
+        JOIN og2genes og2 ON og1.og_id = og2.og_id
+        JOIN genes g2 ON og2.protein_id = g2.odb_gene_id
+        JOIN species s2 ON g2.species_code = s2.species_code
+        WHERE s1.species_name = $species1
+          AND s2.species_name = $species2;
+    """
+
+    shared_odb_levels = None
+    # try:
+    #     results = conn.execute(og_levels_query, {"species1": species1, "species2": species2}).fetchall()
+    #     shared_odb_levels = {row[0] for row in results if row[0] is not None}
+    # except Exception as e:
+    #     print(f"og_levels_query fallback to level2species: {e}")
+    #     shared_odb_levels = set()
+
+    # Fallback to level2species if og2genes is empty
+    if not shared_odb_levels:
+        l2s_query = """
+            SELECT DISTINCT UNNEST(list_intersect(l1.lineage, l2.lineage)) AS level_tax_id
+FROM level2species l1
+JOIN species s1 ON l1.species_code = s1.species_code
+CROSS JOIN level2species l2
+JOIN species s2 ON l2.species_code = s2.species_code
+WHERE s1.species_name = $species1
+  AND s2.species_name = $species2;
+        """
+        l2s_results = conn.execute(l2s_query, {"species1": species1, "species2": species2}).fetchall()
+        print('lineage query results', l2s_results)
+        shared_odb_levels = {row[0] for row in l2s_results}
+
+    print('shared odb levels:', species1, species2, [(level, tid2name[level]) for level in shared_odb_levels])
+
+    if not shared_odb_levels:
+        raise ValueError(f"No common OrthoDB clade found for '{species1}' and '{species2}'.")
+
+    # Walk NCBI lineage from most specific (index 0) to root
+    for node in sdata_lineage:
+        tax_id = node[0] if isinstance(node, (tuple, list)) else node
+        if tax_id in shared_odb_levels:
+            node_name = tid2name.get(
+                tax_id, 
+                str(node[1] if isinstance(node, (tuple, list)) else tax_id)
+            )
+            return (tax_id, node_name)
+
+def odb_mrcall(
+    conn: duckdb.DuckDBPyConnection,
+    species_list: list[str],
+    sdata_lineage: list[tuple[int, str]] | list[str],
+    tid2name: dict[int, str]
+) -> tuple[int, str]:
+    """
+    Finds the most specific OrthoDB clade TaxID shared by a list of 3+ species by
+    intersecting the `lineage` INTEGER[] arrays across all species in level2species.
+    """
+    if not species_list:
+        raise ValueError("species_list cannot be empty.")
+
+    # Dynamically build JOINs and list_intersect calls for N species
+    joins = []
+    intersect_expr = "l0.lineage"
+
+    for i in range(1, len(species_list)):
+        joins.append(f"JOIN level2species l{i} ON l0.species_code != l{i}.species_code")
+        joins.append(f"JOIN species s{i} ON l{i}.species_code = s{i}.species_code")
+        intersect_expr = f"list_intersect({intersect_expr}, l{i}.lineage)"
+
+    where_clauses = [f"s{i}.species_name = $species{i}" for i in range(len(species_list))]
+
+    query = f"""
+        SELECT DISTINCT UNNEST({intersect_expr}) AS level_tax_id
+        FROM level2species l0
+        JOIN species s0 ON l0.species_code = s0.species_code
+        {" ".join(joins)}
+        WHERE {" AND ".join(where_clauses)};
+    """
+
+    params = {f"species{i}": name for i, name in enumerate(species_list)}
+    
+    results = conn.execute(query, params).fetchall()
+    shared_odb_levels = {row[0] for row in results if row[0] is not None}
+    print('shared odb levels across all species:', species_list, shared_odb_levels)
+
+    if not shared_odb_levels:
+        raise ValueError(f"No common OrthoDB clade found across species: {species_list}")
+
+    # Walk NCBI lineage from most specific (index 0) to root
+    for node in sdata_lineage:
+        tax_id = node[0] if isinstance(node, (tuple, list)) else node
+        if tax_id in shared_odb_levels:
+            node_name = tid2name.get(
+                tax_id, 
+                str(node[1] if isinstance(node, (tuple, list)) else tax_id)
+            )
+            return (tax_id, node_name)
+
+
+def getOrthologs(
+    species1: str, 
+    species2: str, 
+    mrca_tid: int, 
+    search_query: str, 
+    limit: int, 
+    conn: duckdb.DuckDBPyConnection,
+    taxid_to_name: dict[int, str]
+) -> dict:
+    
+    BASE_QUERY = """
+    WITH species_a_genes AS (
+    SELECT
+      g.protein_id AS protein_id_a, 
+      g.gene_symbol AS gene_symbol_a,
+      g.locus_tag AS locus_tag_a,
+      g.replicon AS replicon_a,
+      g.coordinates AS coordinates_a,
+      g.description AS description_a,
+      og.og_id
+    FROM species s
+    JOIN genes g ON s.species_code = g.species_code
+    JOIN og2genes og ON g.odb_gene_id = og.protein_id
+    WHERE s.species_name = $species1
+      AND og.og_id LIKE $mrca_pattern
+    QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY 
+            og.og_id, 
+            COALESCE(
+                g.gene_symbol, 
+                g.replicon || ':' || g.coordinates, 
+                g.odb_gene_id
+            )
+        ORDER BY 
+            g.description IS NOT NULL DESC,  -- Prefer annotated transcripts
+            g.protein_id ASC                 -- Deterministic tie-breaker
+    ) = 1
+),
+     species_b_genes AS (
+        SELECT
+        g.protein_id AS protein_id_b, 
+        g.gene_symbol AS gene_symbol_b,
+        g.locus_tag AS locus_tag_b,
+        g.replicon AS replicon_b,
+        g.coordinates AS coordinates_b,
+        g.description AS description_b,
+        og.og_id
+        FROM species s
+        JOIN genes g ON s.species_code = g.species_code
+        JOIN og2genes og ON g.odb_gene_id = og.protein_id
+        WHERE s.species_name = $species2
+        AND og.og_id LIKE $mrca_pattern
+    QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY 
+            og.og_id, 
+            COALESCE(
+                g.gene_symbol, 
+                g.replicon || ':' || g.coordinates, 
+                g.odb_gene_id
+            )
+        ORDER BY 
+            g.description IS NOT NULL DESC,  -- Prefer annotated transcripts
+            g.protein_id ASC                 -- Deterministic tie-breaker
+    ) = 1
+    ),
+    paired_orthologs AS (
+        SELECT 
+          $species1 AS species_a,
+          ap.gene_symbol_a,
+          ap.locus_tag_a,
+          ap.protein_id_a,
+          ap.replicon_a,
+          ap.coordinates_a,
+          ap.description_a,
+          ap.og_id AS orthologous_group,
+          bp.gene_symbol_b,
+          bp.locus_tag_b,
+          bp.protein_id_b,
+          bp.replicon_b,
+          bp.coordinates_b,
+          bp.description_b,
+          $species2 AS species_b
+        FROM species_a_genes ap
+        JOIN species_b_genes bp ON ap.og_id = bp.og_id
+        WHERE 
+            $search_query = '' OR 
+            ap.gene_symbol_a ILIKE $search_pattern OR
+            ap.locus_tag_a ILIKE $search_pattern OR
+            ap.protein_id_a ILIKE $search_pattern OR
+            ap.description_a ILIKE $search_pattern OR
+            ap.og_id ILIKE $search_pattern OR
+            bp.gene_symbol_b ILIKE $search_pattern OR
+            bp.locus_tag_b ILIKE $search_pattern OR
+            bp.protein_id_b ILIKE $search_pattern OR
+            bp.description_b ILIKE $search_pattern
+    ),
+    target_ogs AS (
+        -- Limit by Ortholog Group count rather than pairwise row count
+        SELECT DISTINCT orthologous_group 
+        FROM paired_orthologs
+        ORDER BY orthologous_group
+        LIMIT $limit
+    )
+    SELECT p.*
+    FROM paired_orthologs p
+    JOIN target_ogs t ON p.orthologous_group = t.orthologous_group
+    ORDER BY p.orthologous_group;
+    """
+
+    params = {
+        "species1": species1,
+        "species2": species2,
+        "mrca_pattern": f"%at{mrca_tid}",
+        "search_query": search_query,
+        "search_pattern": f"%{search_query}%",
+        "limit": limit
+    }
+
+    cursor = conn.execute(BASE_QUERY, params)
     columns = [desc[0] for desc in cursor.description]
     db_results = [dict(zip(columns, row)) for row in cursor.fetchall()]
-    return db_results
+
+    og_dict = defaultdict(lambda: {
+        species1: [],
+        species2: []
+    })
+
+    for row in db_results:
+        og_id = row["orthologous_group"]
+        og_entry = og_dict[og_id]
+
+        gene_a = {
+            "gene_symbol": row.get("gene_symbol_a"),
+            "locus_tag": row.get("locus_tag_a"),
+            "replicon:coords": (row.get("replicon_a") or '')+":"+row.get("coordinates_a"),
+            "description": row.get("description_a")
+        }
+        if not any(g["locus_tag"] == gene_a["locus_tag"] for g in og_entry[species1]):
+            og_entry[species1].append(gene_a)
+
+        gene_b = {
+            "gene_symbol": row.get("gene_symbol_b"),
+            "locus_tag": row.get("locus_tag_b"),
+            "replicon:coords": (row.get("replicon_b") or '')+':'+row.get("coordinates_b"),
+            "description": row.get("description_b")
+        }
+        if not any(g["locus_tag"] == gene_b["locus_tag"] for g in og_entry[species2]):
+            og_entry[species2].append(gene_b)
+
+    return dict(og_dict)
+
 
 def getLocalSimilarities(
     species1: str, 
     species2: str, 
     speciesX: str,
-    mrclist: int, 
+    mrcall: int, 
     search: str, 
     limit: int, 
     conn: duckdb.DuckDBPyConnection
-) -> List[any]:
+) -> dict:
+    print('getLocalSimilarities', species1, species2, speciesX, mrcall)
     """
     Finds orthologs shared between species1 and species2, excluding those 
     present in speciesX, and applies an optional search filter and limit.
+    Returns nested dictionary matching getOrthologs output structure.
     """
-    print("getLocalSimilarities", species1, species2, speciesX, mrclist, search, limit)
     subtractive_query = """
-WITH species_a_proteins AS (
-        SELECT 
-          g.og_level, 
-          g.locus_tag AS locus_tag_a,
-          g.replicon AS replicon_a,
-          og.og_id
+    WITH species_a_genes AS (
+        SELECT
+            g.protein_id AS protein_id_a, 
+            g.gene_symbol AS gene_symbol_a,
+            g.locus_tag AS locus_tag_a,
+            g.replicon AS replicon_a,
+            g.coordinates AS coordinates_a,
+            g.description AS description_a,
+            og.og_id
         FROM species s
         JOIN genes g ON s.species_code = g.species_code
-        JOIN og2genes og ON g.og_level = og.protein_id
-        WHERE s.species_name = ?
+        JOIN og2genes og ON g.odb_gene_id = og.protein_id
+        WHERE s.species_name = $species1
+          AND og.og_id LIKE $target_node_pat
+        QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY 
+                og.og_id, 
+                COALESCE(
+                    g.gene_symbol, 
+                    g.replicon || ':' || g.coordinates, 
+                    g.odb_gene_id
+                )
+            ORDER BY 
+                g.description IS NOT NULL DESC,
+                g.protein_id ASC
+        ) = 1
     ),
-    species_b_proteins AS (
-        SELECT 
-          g.og_level, 
-          g.locus_tag AS locus_tag_b,
-          g.replicon AS replicon_b,
-          g.description,
-          og.og_id,
-          s.species_name
+    species_b_genes AS (
+        SELECT
+            g.protein_id AS protein_id_b, 
+            g.gene_symbol AS gene_symbol_b,
+            g.locus_tag AS locus_tag_b,
+            g.replicon AS replicon_b,
+            g.coordinates AS coordinates_b,
+            g.description AS description_b,
+            og.og_id
         FROM species s
         JOIN genes g ON s.species_code = g.species_code
-        JOIN og2genes og ON g.og_level = og.protein_id
-        WHERE s.species_name = ?
+        JOIN og2genes og ON g.odb_gene_id = og.protein_id
+        WHERE s.species_name = $species2
+          AND og.og_id LIKE $target_node_pat
+        QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY 
+                og.og_id, 
+                COALESCE(
+                    g.gene_symbol, 
+                    g.replicon || ':' || g.coordinates, 
+                    g.odb_gene_id
+                )
+            ORDER BY 
+                g.description IS NOT NULL DESC,
+                g.protein_id ASC
+        ) = 1
     ),
-    exclude_species_proteins AS (
+    exclude_species_ogs AS (
         SELECT DISTINCT og.og_id
         FROM species s_exc
         JOIN genes g_exc ON s_exc.species_code = g_exc.species_code
-        JOIN og2genes og ON g_exc.og_level = og.protein_id
-        WHERE s_exc.species_name = ?
+        JOIN og2genes og ON g_exc.odb_gene_id = og.protein_id
+        WHERE s_exc.species_name = $speciesX
     ),
-    base_query AS (
-        SELECT DISTINCT ON (ap.locus_tag_a, bp.locus_tag_b) 
-          ap.og_id AS orthologous_group,
-          ? AS species_a,
-          ap.locus_tag_a,
-          ap.og_level AS protein_id_a,
-          ap.replicon_a,
-          bp.locus_tag_b,
-          bp.og_level AS protein_id_b,
-          bp.replicon_b,
-          bp.description AS description_b,
-          bp.species_name AS species_b
-        FROM species_a_proteins ap
-        JOIN species_b_proteins bp ON ap.og_id = bp.og_id
-        WHERE ap.og_id NOT IN (SELECT og_id FROM exclude_species_proteins)
-          -- Updated to match a comma-separated list of target taxonomic node IDs
-          -- e.g., 'at314145,at33554,at32523'
-          AND regexp_matches(ap.og_id, ?)
+    paired_orthologs AS (
+        SELECT 
+            $species1 AS species_a,
+            ap.gene_symbol_a,
+            ap.locus_tag_a,
+            ap.protein_id_a,
+            ap.replicon_a,
+            ap.coordinates_a,
+            ap.description_a,
+            ap.og_id AS orthologous_group,
+            bp.gene_symbol_b,
+            bp.locus_tag_b,
+            bp.protein_id_b,
+            bp.replicon_b,
+            bp.coordinates_b,
+            bp.description_b,
+            $species2 AS species_b
+        FROM species_a_genes ap
+        JOIN species_b_genes bp ON ap.og_id = bp.og_id
+        WHERE ap.og_id NOT IN (SELECT og_id FROM exclude_species_ogs)
+          AND (
+            $search_query = '' OR 
+            ap.gene_symbol_a ILIKE $search_pattern OR
+            ap.locus_tag_a ILIKE $search_pattern OR
+            ap.protein_id_a ILIKE $search_pattern OR
+            ap.description_a ILIKE $search_pattern OR
+            ap.og_id ILIKE $search_pattern OR
+            bp.gene_symbol_b ILIKE $search_pattern OR
+            bp.locus_tag_b ILIKE $search_pattern OR
+            bp.protein_id_b ILIKE $search_pattern OR
+            bp.description_b ILIKE $search_pattern
+          )
+    ),
+    target_ogs AS (
+        SELECT DISTINCT orthologous_group 
+        FROM paired_orthologs
+        ORDER BY orthologous_group
+        LIMIT $limit
     )
-    SELECT * FROM base_query
-    WHERE 
-        ? = '' OR 
-        CAST(species_a AS VARCHAR) ILIKE ? OR
-        CAST(locus_tag_a AS VARCHAR) ILIKE ? OR
-        CAST(protein_id_a AS VARCHAR) ILIKE ? OR
-        CAST(replicon_a AS VARCHAR) ILIKE ? OR
-        CAST(orthologous_group AS VARCHAR) ILIKE ? OR
-        CAST(locus_tag_b AS VARCHAR) ILIKE ? OR
-        CAST(protein_id_b AS VARCHAR) ILIKE ? OR
-        CAST(replicon_b AS VARCHAR) ILIKE ? OR
-        CAST(description_b AS VARCHAR) ILIKE ? OR
-        CAST(species_b AS VARCHAR) ILIKE ?
-    ORDER BY replicon_a
-    LIMIT ?;
+    SELECT p.*
+    FROM paired_orthologs p
+    JOIN target_ogs t ON p.orthologous_group = t.orthologous_group
+    ORDER BY p.orthologous_group;
     """
-    
-    target_nodes_regex = "at(" + '|'.join([str(x) for x in mrclist]) + ")"
+
+    target_node_pat = "%at" + str(mrcall)
     search_term = search if search is not None else ""
     search_pattern = f"%{search_term}%"
 
-    params = [
-        species1,            # 1. species_a_proteins
-        species2,            # 2. species_b_proteins
-        speciesX,            # 3. exclude_species_proteins (subtraction target)
-        species1,            # 4. base_query SELECT species_a
-        target_nodes_regex,        # 5. ap.og_id LIKE ?
-        search_term,         # 5. WHERE ? = ''
-        search_pattern,      # 6. species_a ILIKE
-        search_pattern,      # 7. locus_tag_a ILIKE
-        search_pattern,      # 8. protein_id_a ILIKE
-        search_pattern,      # 9. replicon_a ILIKE
-        search_pattern,      # 10. orthologous_group ILIKE
-        search_pattern,      # 11. locus_tag_b ILIKE
-        search_pattern,      # 12. protein_id_b ILIKE
-        search_pattern,      # 13. replicon_b ILIKE
-        search_pattern,      # 14. description_b ILIKE
-        search_pattern,      # 15. species_b ILIKE
-        limit                # 16. LIMIT
-    ]
+    params = {
+        "species1": species1,
+        "species2": species2,
+        "speciesX": speciesX,
+        "target_node_pat": target_node_pat,
+        "search_query": search_term,
+        "search_pattern": search_pattern,
+        "limit": limit
+    }
 
     try:
-        results = conn.execute(subtractive_query, params).fetchall()
-        return results
+        cursor = conn.execute(subtractive_query, params)
+        columns = [desc[0] for desc in cursor.description]
+        db_results = [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+        og_dict = defaultdict(lambda: {
+            species1: [],
+            species2: []
+        })
+
+        for row in db_results:
+            og_id = row["orthologous_group"]
+            og_entry = og_dict[og_id]
+
+            gene_a = {
+                "gene_symbol": row.get("gene_symbol_a"),
+                "locus_tag": row.get("locus_tag_a"),
+                "replicon:coords": (row.get("replicon_a") or '') + ":" + (row.get("coordinates_a") or ''),
+                "description": row.get("description_a")
+            }
+            if not any(g["locus_tag"] == gene_a["locus_tag"] for g in og_entry[species1]):
+                og_entry[species1].append(gene_a)
+
+            gene_b = {
+                "gene_symbol": row.get("gene_symbol_b"),
+                "locus_tag": row.get("locus_tag_b"),
+                "replicon:coords": (row.get("replicon_b") or '') + ":" + (row.get("coordinates_b") or ''),
+                "description": row.get("description_b")
+            }
+            if not any(g["locus_tag"] == gene_b["locus_tag"] for g in og_entry[species2]):
+                og_entry[species2].append(gene_b)
+
+        return dict(og_dict)
+
     except Exception as e:
         print(f"Error executing getLocalSimilarities: {e}")
-        return []
+        return {}
 
-def getLineage(species: str, conn: duckdb.DuckDBPyConnection) -> List[str]:
+def getLineage(species: str, conn: duckdb.DuckDBPyConnection) -> List[tuple]:
     # Force lowercase comparison and restrict to actual scientific names
     tax_query = """
         SELECT tax_id 
@@ -260,14 +529,10 @@ def getLineage(species: str, conn: duckdb.DuckDBPyConnection) -> List[str]:
         ORDER BY lt.depth ASC;
     """
     
-    try:
-        results = conn.execute(lineage_query, [start_tax_id]).fetchall()
-        lineage = results
-        print("Lineage:", lineage)
-        return lineage
-    except Exception as e:
-        print(f"Lineage traversal error (is nodes table missing?): {e}")
-        return [None, species] # Fallback gracefully
+    results = conn.execute(lineage_query, [start_tax_id]).fetchall()
+    lineage = results
+    print("Lineage:", lineage)
+    return lineage
 
 def species_gene_count(species: str, conn: duckdb.DuckDBPyConnection) -> int:
     """
@@ -433,7 +698,7 @@ async def process_orthologs(payload: OrthologsRequest):
             with sqlite3.connect(NCBI_DB_PATH) as conn:
                 conn.row_factory = sqlite3.Row  
                 cursor = conn.cursor()
-                cursor.execute(ORTHOLOGS_QUERY_TEXT, (f"%{raw_name1}%", f"%{raw_name2}%"))
+                cursor.execute(ORTHOLOGS_QUERY_TEXT, (f"%{sdatas[0]['scientificName']}%", f"%{sdatas[0]['scientificName']}%"))
                 rows = cursor.fetchall()
                 db_results = [dict(row) for row in rows]
         else:
@@ -444,44 +709,91 @@ async def process_orthologs(payload: OrthologsRequest):
                 inspect_duckdb(conn)
                 for sdata in sdatas:
                     sdata['lineage'] = getLineage(sdata['scientificName'], conn)
-                matching_nodes = [pair[0] for pair in zip(
-                    sdatas[0]['lineage'][::-1], sdatas[1]['lineage'][::-1]
-                ) if pair[0] == pair[1]]
-                extras['mrca'] = matching_nodes[-1] if matching_nodes else None                    
+                lin1 = sdatas[0]['lineage'][::-1]
+                lin2 = sdatas[1]['lineage'][::-1]
+                shared_nodes = []
+                for node_a, node_b in zip(lin1, lin2):
+                    if node_a == node_b:
+                        shared_nodes.append(node_a)
+                    else:
+                        break  # Stop as soon as the lineage trees diverge!
+                extras['mrca'] = shared_nodes[-1] if shared_nodes else None
                 print("MCRA calculation", sdatas[0]['scientificName'], sdatas[1]['scientificName'], extras['mrca'])
                 if len(sdatas)>2:
-                    matching_nodes = [trip[0] for trip in zip(
-                        sdatas[0]['lineage'][::-1], sdatas[1]['lineage'][::-1], sdatas[2]['lineage'][::-1]
-                    ) if trip[0] == trip[1] and trip[1] == trip[2]]
-                    extras['mrcall'] = matching_nodes[-1] if matching_nodes else None
-                    print("MRCA of all species", extras['mrcall'])
-                    extras['mrclist'] = [trip[0] for trip in zip(
-                        sdatas[0]['lineage'][::-1], sdatas[1]['lineage'][::-1], sdatas[2]['lineage'][::-1]
-                    ) if trip[0] == trip[1] and trip[1] != trip[2]] + [extras['mrcall']]
+                    lin3 = sdatas[2]['lineage'][::-1]
+
+                    # MRCA of all three
+                    mrca_all = []
+                    for a, b, c in zip(lin1, lin2, lin3):
+                        if a == b == c:
+                            mrca_all.append(a)
+                        else:
+                            break
+                    extras['mrcall'] = mrca_all[-1] if mrca_all else None
+
+                    # MRCA of Species 1 & Species 2
+                    mrca_12 = []
+                    for a, b in zip(lin1, lin2):
+                        if a == b:
+                            mrca_12.append(a)
+                        else:
+                            break
+                            
+                    # Include all common nodes between 1 & 2 that are NOT shared with species 3
+                    extras['mrclist'] = [
+                        node for node in mrca_12 if node not in mrca_all
+                    ] + ([extras['mrcall']] if extras['mrcall'] else [])
                     
 
-
+            odb_name_mapping = {
+                "Dictyostelium discoideum": "Dictyostelium discoideum AX4",
+                "Gorilla gorilla": "Gorilla gorilla gorilla"
+            }
+            def odbName(name):
+                return odb_name_mapping[name] if name in odb_name_mapping else name
 
             with duckdb.connect(ORTHODB_DB_PATH, read_only=True) as conn:
                 inspect_duckdb(conn)
+                taxid_to_name = {}
                 for sdata in sdatas:
-                    sdata['gene_count'] = species_gene_count(sdata['scientificName'], conn)
+                    sdata['gene_count'] = species_gene_count(odbName(sdata['scientificName']), conn)
+                    for n,s in sdata['lineage']:
+                        taxid_to_name[n] = s
+                extras['odb_mrca'] = odb_mrca(
+                    conn,
+                    odbName(sdatas[0]['scientificName']), 
+                    odbName(sdatas[1]['scientificName']),
+                    sdatas[0]['lineage'],
+                    taxid_to_name
+                )
                 if(len(sdatas) > 2):
+                    extras['odb_mrcall'] = odb_mrcall(
+                        conn,
+                        [
+                            odbName(sdatas[0]['scientificName']), 
+                            odbName(sdatas[1]['scientificName']),
+                            odbName(sdatas[2]['scientificName'])
+                        ],
+                        sdatas[0]['lineage'],
+                        taxid_to_name
+                    )
                     db_results = getLocalSimilarities(
-                        sdatas[0]['scientificName'],
-                        sdatas[1]['scientificName'],
-                        sdatas[2]['scientificName'],
-                        [x[0] for x in extras['mrclist']],
+                        odbName(sdatas[0]['scientificName']),
+                        odbName(sdatas[1]['scientificName']),
+                        odbName(sdatas[2]['scientificName']),
+                        extras['odb_mrcall'][0],
                         search_query,
                         20000,
                         conn)
-                else: 
+                else:
                     db_results = getOrthologs(
-                        sdatas[0]['scientificName'],
-                        sdatas[1]['scientificName'],
+                        odbName(sdatas[0]['scientificName']),
+                        odbName(sdatas[1]['scientificName']),
+                        extras['odb_mrca'][0],
                         search_query,
                         20000,
-                        conn)
+                        conn,
+                        taxid_to_name)
 
 
         print(f"got {len(db_results)} results from {payload.database}")
@@ -519,6 +831,13 @@ async def serve_frontend():
     if os.path.exists(file_path):
         return FileResponse(file_path)
     return {"error": "GBbackgroundimage.jpg not found"}
+
+@app.get("/barn.jpg")
+async def serve_frontend():
+    file_path = "../barn.jpg"
+    if os.path.exists(file_path):
+        return FileResponse(file_path)
+    return {"error": "barn.jpg not found"}
 
 PICTURES_DIR = "../pictures"
 app.mount("/pictures", StaticFiles(directory=PICTURES_DIR), name="picture")
