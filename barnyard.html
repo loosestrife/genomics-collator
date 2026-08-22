@@ -252,415 +252,441 @@
         <button id="sendBtn" disabled>Send Query</button>
 
         <div>
-          <input type="checkbox" id="collapseOrthogroupsCheckbox"/><label>Collapse Orthogroups</label>
+          <input type="checkbox" id="collapseOrthogroupsCheckbox" /><label
+            >Collapse Orthogroups</label
+          >
           <div id="response">Server response will show here...</div>
         </div>
       </div>
     </div>
 
     <script>
-      // Lightweight DOM creation helper
-      const html = ["div", "span", "input"].reduce((acc, tag) => {
-        acc[tag] = (props = {}, children = []) => {
-          const el = document.createElement(tag);
-          Object.entries(props).forEach(([k, v]) => {
-            if (k === "class") el.className = v;
-            else el[k] = v;
+            // Lightweight DOM creation helper
+            const html = ["div", "span", "input"].reduce((acc, tag) => {
+              acc[tag] = (props = {}, children = []) => {
+                const el = document.createElement(tag);
+                Object.entries(props).forEach(([k, v]) => {
+                  if (k === "class") el.className = v;
+                  else el[k] = v;
+                });
+                (Array.isArray(children) ? children : [children]).forEach((c) => {
+                  if (c)
+                    el.appendChild(
+                      typeof c === "string" ? document.createTextNode(c) : c,
+                    );
+                });
+                return el;
+              };
+              return acc;
+            }, {});
+
+            const uploadedFiles = {
+              image1: null,
+              image2: null,
+              imageX: null,
+              database: "orthodb",
+              search: "",
+            };
+
+      function collapseOrthogroups(dbResults) {
+        if (!dbResults) return {};
+
+        const stopWords = new Set([
+          'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from',
+          'has', 'he', 'in', 'is', 'it', 'its', 'of', 'on', 'that', 'the',
+          'to', 'was', 'were', 'will', 'with', 'protein',
+          'isoform', 'like', 'type', 'putative', 'member', 'family'
+        ]);
+
+        const processed = {};
+        for (const [ogId, speciesMap] of Object.entries(dbResults)) {
+          const wordCounts = {};
+          const speciesCounts = [];
+
+          Object.entries(speciesMap).forEach(([speciesName, genes], i) => {
+            if (!Array.isArray(genes)) return;
+            speciesCounts[i] = genes.length;
+
+            for (const gene of genes) {
+              if (!gene.description) continue;
+
+              const words = gene.description
+                .toLowerCase()
+                .replace(/[^a-z0-9\s-]/g, ' ')
+                .split(/\s+/);
+
+              for (const word of words) {
+                if (word.length > 2 && !stopWords.has(word) && isNaN(word)) {
+                  wordCounts[word] = (wordCounts[word] || 0) + 1;
+                }
+              }
+            }
           });
-          (Array.isArray(children) ? children : [children]).forEach((c) => {
-            if (c)
-              el.appendChild(
-                typeof c === "string" ? document.createTextNode(c) : c,
-              );
-          });
-          return el;
-        };
-        return acc;
-      }, {});
 
-      const uploadedFiles = {
-        image1: null,
-        image2: null,
-        imageX: null,
-        database: "orthodb",
-        search: "",
-      };
+          const sortedWords = Object.entries(wordCounts)
+            .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+            .map(([word]) => word);
 
-function collapseOrthogroups(dbResults) {
-  if (!dbResults) return {};
-  
-  const stopWords = new Set([
-    'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from',
-    'has', 'he', 'in', 'is', 'it', 'its', 'of', 'on', 'that', 'the',
-    'to', 'was', 'were', 'will', 'with', 'protein',
-    'isoform', 'like', 'type', 'putative', 'member', 'family'
-  ]);
+          const summaryText = `(${speciesCounts.join(', ')}) ` + (
+            sortedWords.length > 0 ? sortedWords.join(', ') : 'No descriptive terms found'
+          );
 
-  const processed = {};
-  for (const [ogId, speciesMap] of Object.entries(dbResults)) {
-    const wordCounts = {};
-    const speciesCounts = [];
-    
-    Object.entries(speciesMap).forEach(([speciesName, genes], i) => {
-      if (!Array.isArray(genes)) return;
-      speciesCounts[i] = genes.length;
-      
-      for (const gene of genes) {
-        if (!gene.description) continue;
-
-        const words = gene.description
-          .toLowerCase()
-          .replace(/[^a-z0-9\s-]/g, ' ')
-          .split(/\s+/);
-
-        for (const word of words) {
-          if (word.length > 2 && !stopWords.has(word) && isNaN(word)) {
-            wordCounts[word] = (wordCounts[word] || 0) + 1;
-          }
+          processed[ogId] = {
+            summary: summaryText,
+            raw: speciesMap
+          };
         }
-      }
-    });
 
-    const sortedWords = Object.entries(wordCounts)
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-      .map(([word]) => word);
-
-    const summaryText = `(${speciesCounts.join(', ')}) ` + (
-      sortedWords.length > 0 ? sortedWords.join(', ') : 'No descriptive terms found'
-    );
-
-    processed[ogId] = {
-      summary: summaryText,
-      raw: speciesMap
-    };
-  }
-
-  return processed;
-}
-
-
-
-const renderCurrentData = () => {
-  if (!window.currentData || !window.currentData.dbResults) return;
-  const res = document.getElementById('response');
-  res.innerHTML = ''; // Clear previous text output
-
-  const globalCollapsed = document.getElementById('collapseOrthogroupsCheckbox').checked;
-
-  if (!globalCollapsed) {
-    // Show raw JSON output as normal
-    const pre = document.createElement('pre');
-    pre.textContent = JSON.stringify(window.currentData, null, 2);
-    res.appendChild(pre);
-    return;
-  }
-
-  // Generate collapsed summaries with individual toggle checkboxes
-  const collapsedData = collapseOrthogroups(window.currentData.dbResults);
-
-  const container = document.createElement('div');
-  container.style.display = 'flex';
-  container.style.flexDirection = 'column';
-  container.style.gap = '12px';
-
-  for (const [ogId, { summary, raw }] of Object.entries(collapsedData)) {
-    const card = document.createElement('div');
-    card.style.border = '1px solid #ddd';
-    card.style.borderRadius = '4px';
-    card.style.padding = '8px';
-    card.style.backgroundColor = '#fff';
-
-    // Header row with Orthogroup ID and Uncollapse checkbox
-    const header = document.createElement('div');
-    header.style.display = 'flex';
-    header.style.alignItems = 'center';
-    header.style.gap = '10px';
-    header.style.marginBottom = '6px';
-
-    const title = document.createElement('strong');
-    title.textContent = ogId;
-
-    const label = document.createElement('label');
-    label.style.fontSize = '11px';
-    label.style.cursor = 'pointer';
-
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.style.marginRight = '4px';
-
-    label.appendChild(checkbox);
-    label.appendChild(document.createTextNode('Uncollapse this'));
-
-    header.appendChild(title);
-    header.appendChild(label);
-
-    // Content container (Summary view vs Raw JSON view)
-    const content = document.createElement('div');
-    content.className = 'og-content';
-    content.textContent = summary;
-
-    // Toggle content view on checkbox change
-    checkbox.addEventListener('change', (e) => {
-      if (e.target.checked) {
-        content.innerHTML = `<pre style="margin: 0; font-size: 11px; white-space: pre-wrap;">${JSON.stringify(raw, null, 2)}</pre>`;
-      } else {
-        content.textContent = summary;
-      }
-    });
-
-    card.appendChild(header);
-    card.appendChild(content);
-    container.appendChild(card);
-  }
-
-  res.appendChild(container);
-};
-
-
-      window.onload = () => {
-        const zonesContainer = document.getElementById("zones");
-
-        [1, 2, /*"X"*/].forEach((n) => {
-          const storageKey = "image" + n;
-          const isOptional = n === "X";
-
-          const fileInput = html.input({
-            type: "file",
-            id: "fileInput" + n,
-            accept: "image/*",
-            style: "display:none",
-          });
-
-          const textInput = html.input({
-            type: "text",
-            class: "drop-zone-input",
-            id: "textInput" + n,
-            placeholder: `Species ${n} name or drop image...`,
-          });
-
-          const dropZone = html.div(
-            {
-              class: n == "X" ? "drop-zone-wide" : "drop-zone",
-              id: "zone" + n,
-            },
-            [
-              html.span({ class: "zone-text" }, [
-                `Drop image ${n} here${isOptional ? " (Optional)" : ""} or click`,
-              ]),
-            ],
-          );
-
-          zonesContainer.appendChild(
-            html.div({ class: "drop-zone-wrapper" }, [
-              dropZone,
-              textInput,
-              fileInput,
-            ]),
-          );
-
-          setupZone(dropZone, fileInput, textInput, storageKey);
-        });
-
-        // Load pen images from pictures.json
-        fetch("pictures.json")
-          .then((x) => x.json())
-          .then((pictures) => loadPenImages(pictures))
-          .catch((err) => console.error("Could not load pictures.json:", err));
-      };
-
-      document
-        .getElementById("databaseSelect")
-        .addEventListener("change", (e) => {
-          uploadedFiles.database = e.target.value;
-        });
-
-      document.getElementById("searchInput").addEventListener("input", (e) => {
-        uploadedFiles.search = e.target.value;
-      });
-
-      function setupZone(zone, fileInput, textInput, storageKey) {
-        zone.addEventListener("click", () => fileInput.click());
-        zone.addEventListener("dragover", (e) => {
-          e.preventDefault();
-          zone.classList.add("dragover");
-        });
-        zone.addEventListener("dragleave", () =>
-          zone.classList.remove("dragover"),
-        );
-
-        zone.addEventListener("drop", (e) => {
-          e.preventDefault();
-          zone.classList.remove("dragover");
-
-          if (e.dataTransfer.files.length) {
-            processFile(e.dataTransfer.files[0], zone, textInput, storageKey);
-            return;
-          }
-
-          const imageSrc = e.dataTransfer.getData("text/plain");
-          if (imageSrc) {
-            processPenImage(imageSrc, zone, textInput, storageKey);
-          }
-        });
-
-        fileInput.addEventListener("change", () => {
-          if (fileInput.files.length)
-            processFile(fileInput.files[0], zone, textInput, storageKey);
-        });
-
-        textInput.addEventListener("input", () => {
-          clearZoneVisuals(zone);
-
-          if (!uploadedFiles[storageKey]) {
-            uploadedFiles[storageKey] = {};
-          }
-          uploadedFiles[storageKey].species = textInput.value;
-          uploadedFiles[storageKey].fileData = null;
-
-          updateButtonState();
-        });
+        return processed;
       }
 
-      function processFile(file, zoneElement, textInputElement, storageKey) {
-        if (!file.type.startsWith("image/")) {
-          document.getElementById("response").innerText =
-            "Error: Dropped file must be an image.";
+
+
+      const renderCurrentData = () => {
+        if (!window.currentData || !window.currentData.dbResults) return;
+        const res = document.getElementById('response');
+        res.innerHTML = ''; // Clear previous text output
+
+        const globalCollapsed = document.getElementById('collapseOrthogroupsCheckbox').checked;
+
+        if (!globalCollapsed) {
+          // Show raw JSON output as normal
+          const pre = document.createElement('pre');
+          pre.textContent = JSON.stringify(window.currentData, null, 2);
+          res.appendChild(pre);
           return;
         }
 
-        const reader = new FileReader();
-        reader.onload = function () {
-          uploadedFiles[storageKey] = {
-            fileName: file.name,
-            fileData: reader.result,
-          };
-          updateZoneVisuals(zoneElement, reader.result);
-        };
-        reader.readAsDataURL(file);
-      }
+        // Generate collapsed summaries with individual toggle checkboxes
+        const collapsedData = collapseOrthogroups(window.currentData.dbResults);
 
-      async function processPenImage(
-        imageSrc,
-        zoneElement,
-        textInputElement,
-        storageKey,
-      ) {
-        try {
-          const fileName = imageSrc.split("/").pop();
-          const decodedName = decodeURIComponent(fileName);
-          const scientificName = stripExtension(decodedName).split(' ').slice(0,2).join(' ');
-          uploadedFiles[storageKey] = {
-            fileName: fileName,
-            fileData: imageSrc,
-            species: scientificName,
-          };
+        const container = document.createElement('div');
+        container.style.display = 'flex';
+        container.style.flexDirection = 'column';
+        container.style.gap = '12px';
 
-          textInputElement.value = scientificName;
-          updateZoneVisuals(zoneElement, imageSrc);
-        } catch (error) {
-          document.getElementById("response").innerText =
-            `Error loading pen image: ${error.message}`;
-        }
-      }
+        for (const [ogId, { summary, raw }] of Object.entries(collapsedData)) {
+          const card = document.createElement('div');
+          card.style.border = '1px solid #ddd';
+          card.style.borderRadius = '4px';
+          card.style.padding = '8px';
+          card.style.backgroundColor = '#fff';
 
-      function updateZoneVisuals(zoneElement, dataUrl) {
-        zoneElement.classList.add("has-file");
+          // Header row with Orthogroup ID and Uncollapse checkbox
+          const header = document.createElement('div');
+          header.style.display = 'flex';
+          header.style.alignItems = 'center';
+          header.style.gap = '10px';
+          header.style.marginBottom = '6px';
 
-        const oldImg = zoneElement.querySelector(".thumb-preview");
-        if (oldImg) oldImg.remove();
+          const title = document.createElement('strong');
+          title.textContent = ogId;
 
-        const img = document.createElement("img");
-        img.src = dataUrl;
-        img.className = "thumb-preview";
-        zoneElement.appendChild(img);
+          const label = document.createElement('label');
+          label.style.fontSize = '11px';
+          label.style.cursor = 'pointer';
 
-        const textSpan = zoneElement.querySelector(".zone-text");
-        if (textSpan) textSpan.style.display = "none";
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.style.marginRight = '4px';
 
-        updateButtonState();
-      }
+          label.appendChild(checkbox);
+          label.appendChild(document.createTextNode('Uncollapse this'));
 
-      function clearZoneVisuals(zoneElement) {
-        zoneElement.classList.remove("has-file");
-        const oldImg = zoneElement.querySelector(".thumb-preview");
-        if (oldImg) oldImg.remove();
+          header.appendChild(title);
+          header.appendChild(label);
 
-        const textSpan = zoneElement.querySelector(".zone-text");
-        if (textSpan) textSpan.style.display = "block";
-      }
+          // Content container (Summary view vs Raw JSON view)
+          const content = document.createElement('div');
+          content.className = 'og-content';
+          content.textContent = summary;
 
-      function updateButtonState() {
-        const sendBtn = document.getElementById("sendBtn");
-
-        const valid1 =
-          uploadedFiles.image1 &&
-          (uploadedFiles.image1.fileData ||
-              uploadedFiles.image1.species);
-        const valid2 =
-          uploadedFiles.image2 &&
-          (uploadedFiles.image2.fileData ||
-            uploadedFiles.image2.species);
-
-        sendBtn.disabled = !(valid1 && valid2);
-      }
-
-      async function sendToServer() {
-        const res = document.getElementById("response");
-        const sendBtn = document.getElementById("sendBtn");
-
-        res.innerText = "Sending payload to /orthologs...";
-        sendBtn.disabled = true;
-
-        try {
-          const response = await fetch("/orthologs", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(uploadedFiles),
+          // Toggle content view on checkbox change
+          checkbox.addEventListener('change', (e) => {
+            if (e.target.checked) {
+              content.innerHTML = `<pre style="margin: 0; font-size: 11px; white-space: pre-wrap;">${JSON.stringify(raw, null, 2)}</pre>`;
+            } else {
+              content.textContent = summary;
+            }
           });
 
-          const isJson = response.headers
-            .get("content-type")
-            ?.includes("application/json");
-          const data = isJson ? await response.json() : await response.text();
-
-          if (response.ok) {
-            window.currentData = data;
-            renderCurrentData();
-          } else {
-            res.innerText = `Server Error (${response.status}): ${typeof data === "object" ? JSON.stringify(data) : data}`;
-          }
-        } catch (error) {
-          res.innerText = `Network Error: ${error.message}`;
+          card.appendChild(header);
+          card.appendChild(content);
+          container.appendChild(card);
         }
-      }
 
-      document
-        .getElementById("sendBtn")
-        .addEventListener("click", sendToServer);
+        res.appendChild(container);
+      };
 
-      function loadPenImages(imageList) {
-        const penDiv = document.getElementById("penContainer");
-        penDiv.innerHTML = "";
 
-        imageList.forEach((fileName) => {
-          const img = html.input ? document.createElement("img") : null;
-          img.src = `pictures/${fileName}`;
-          img.alt = fileName.split(".").slice(0, -1).join(".");
-          img.draggable = true;
-          img.addEventListener("dragstart", (e) => {
-            e.dataTransfer.setData("text/plain", img.src);
-          });
+            window.onload = () => {
+              const zonesContainer = document.getElementById("zones");
 
-          //const label = html.span({ class: "pen-filename" }, [fileName]);
-          const item = html.div({ class: "pen-item" }, [img, /*label*/]);
+              [1, 2, /*"X"*/].forEach((n) => {
+                const storageKey = "image" + n;
+                const isOptional = n === "X";
 
-          penDiv.appendChild(item);
-        });
-      }
+                const fileInput = html.input({
+                  type: "file",
+                  id: "fileInput" + n,
+                  accept: "image/*",
+                  style: "display:none",
+                });
 
-      function stripExtension(n){
-        return n.split('.').slice(0,-1).join('.');
-      }
+                const textInput = html.input({
+                  type: "text",
+                  class: "drop-zone-input",
+                  id: "textInput" + n,
+                  placeholder: `Species ${n} name or drop image...`,
+                });
+
+                const dropZone = html.div(
+                  {
+                    class: n == "X" ? "drop-zone-wide" : "drop-zone",
+                    id: "zone" + n,
+                  },
+                  [
+                    html.span({ class: "zone-text" }, [
+                      `Drop image ${n} here${isOptional ? " (Optional)" : ""} or click`,
+                    ]),
+                  ],
+                );
+
+                zonesContainer.appendChild(
+                  html.div({ class: "drop-zone-wrapper" }, [
+                    dropZone,
+                    textInput,
+                    fileInput,
+                  ]),
+                );
+
+                setupZone(dropZone, fileInput, textInput, storageKey);
+              });
+
+              // Load pen images from pictures.json
+              fetch("pictures.json")
+                .then((x) => x.json())
+                .then((pictures) => loadPenImages(pictures))
+                .catch((err) => console.error("Could not load pictures.json:", err));
+            };
+
+            document
+              .getElementById("databaseSelect")
+              .addEventListener("change", (e) => {
+                uploadedFiles.database = e.target.value;
+              });
+
+            document.getElementById("searchInput").addEventListener("input", (e) => {
+              uploadedFiles.search = e.target.value;
+            });
+
+            function setupZone(zone, fileInput, textInput, storageKey) {
+              zone.addEventListener("click", () => fileInput.click());
+              zone.addEventListener("dragover", (e) => {
+                e.preventDefault();
+                zone.classList.add("dragover");
+              });
+              zone.addEventListener("dragleave", () =>
+                zone.classList.remove("dragover"),
+              );
+
+              zone.addEventListener("drop", (e) => {
+                e.preventDefault();
+                zone.classList.remove("dragover");
+
+                if (e.dataTransfer.files.length) {
+                  processFile(e.dataTransfer.files[0], zone, textInput, storageKey);
+                  return;
+                }
+
+                const imageSrc = e.dataTransfer.getData("text/plain");
+                if (imageSrc) {
+                  processPenImage(imageSrc, zone, textInput, storageKey);
+                }
+              });
+
+              fileInput.addEventListener("change", () => {
+                if (fileInput.files.length)
+                  processFile(fileInput.files[0], zone, textInput, storageKey);
+              });
+
+              textInput.addEventListener("input", () => {
+                clearZoneVisuals(zone);
+
+                if (!uploadedFiles[storageKey]) {
+                  uploadedFiles[storageKey] = {};
+                }
+                uploadedFiles[storageKey].species = textInput.value;
+                uploadedFiles[storageKey].fileData = null;
+
+                updateButtonState();
+              });
+            }
+
+            function processFile(file, zoneElement, textInputElement, storageKey) {
+              if (!file.type.startsWith("image/")) {
+                document.getElementById("response").innerText =
+                  "Error: Dropped file must be an image.";
+                return;
+              }
+
+              const reader = new FileReader();
+              reader.onload = function () {
+                uploadedFiles[storageKey] = {
+                  fileName: file.name,
+                  fileData: reader.result,
+                };
+                updateZoneVisuals(zoneElement, reader.result);
+              };
+              reader.readAsDataURL(file);
+            }
+
+            async function processPenImage(
+              imageSrc,
+              zoneElement,
+              textInputElement,
+              storageKey,
+            ) {
+              try {
+                const fileName = imageSrc.split("/").pop();
+                const decodedName = decodeURIComponent(fileName);
+                const scientificName = stripExtension(decodedName).split(' ').slice(0,2).join(' ');
+                uploadedFiles[storageKey] = {
+                  fileName: fileName,
+                  fileData: imageSrc,
+                  species: scientificName,
+                };
+
+                textInputElement.value = scientificName;
+                updateZoneVisuals(zoneElement, imageSrc);
+              } catch (error) {
+                document.getElementById("response").innerText =
+                  `Error loading pen image: ${error.message}`;
+              }
+            }
+
+            function updateZoneVisuals(zoneElement, dataUrl) {
+              zoneElement.classList.add("has-file");
+
+              const oldImg = zoneElement.querySelector(".thumb-preview");
+              if (oldImg) oldImg.remove();
+
+              const img = document.createElement("img");
+              img.src = dataUrl;
+              img.className = "thumb-preview";
+              zoneElement.appendChild(img);
+
+              const textSpan = zoneElement.querySelector(".zone-text");
+              if (textSpan) textSpan.style.display = "none";
+
+              updateButtonState();
+            }
+
+            function clearZoneVisuals(zoneElement) {
+              zoneElement.classList.remove("has-file");
+              const oldImg = zoneElement.querySelector(".thumb-preview");
+              if (oldImg) oldImg.remove();
+
+              const textSpan = zoneElement.querySelector(".zone-text");
+              if (textSpan) textSpan.style.display = "block";
+            }
+
+            function updateButtonState() {
+              const sendBtn = document.getElementById("sendBtn");
+
+              const valid1 =
+                uploadedFiles.image1 &&
+                (uploadedFiles.image1.fileData ||
+                    uploadedFiles.image1.species);
+              const valid2 =
+                uploadedFiles.image2 &&
+                (uploadedFiles.image2.fileData ||
+                  uploadedFiles.image2.species);
+
+              sendBtn.disabled = !(valid1 && valid2);
+            }
+
+            async function sendToServer() {
+              const res = document.getElementById("response");
+              const sendBtn = document.getElementById("sendBtn");
+
+              res.innerText = "Sending payload to /orthologs...";
+              sendBtn.disabled = true;
+
+              try {
+                const response = await fetch("/orthologs", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(uploadedFiles),
+                });
+
+                const textStream = response.body.pipeThrough(new TextDecoderStream());
+                const reader = textStream.getReader();
+                let leftovers = '';
+                while(true){
+                  const { done, value: chunk } = await reader.read();
+                  const msgs = (leftovers+(done?'':chunk)).split('\n\n');
+                  leftovers = msgs.pop()
+                  for(const msgRaw of msgs){
+                    let msg;
+                    try {
+                      msg = JSON.parse(msgRaw);
+                    } catch(e) {
+                      console.log(msgRaw);
+                    }
+                    console.log(msg);
+                    res.innerText += JSON.stringify(msg, null, 2) + '\n\n';
+                    window.lastMsg = msg;
+                  }
+                  if(done){
+                    res.innerText += leftovers;
+                    try {
+                      window.lastMsg = JSON.parse(leftovers);
+                    } catch(e) {
+                      console.log(leftovers);
+                    }
+                    window.currentData = window.lastMsg;
+                    renderCurrentData();
+                    updateButtonState();
+                    return;
+                  }
+                }
+              } catch(e) {
+                console.log(e);
+                updateButtonState();
+                res.innerText += e;
+              }
+            }
+
+            document
+              .getElementById("sendBtn")
+              .addEventListener("click", sendToServer);
+
+            document.getElementById("collapseOrthogroupsCheckbox").onclick = renderCurrentData;
+
+            function loadPenImages(imageList) {
+              const penDiv = document.getElementById("penContainer");
+              penDiv.innerHTML = "";
+
+              imageList.forEach((fileName) => {
+                const img = html.input ? document.createElement("img") : null;
+                img.src = `pictures/${fileName}`;
+                img.alt = fileName.split(".").slice(0, -1).join(".");
+                img.draggable = true;
+                img.addEventListener("dragstart", (e) => {
+                  e.dataTransfer.setData("text/plain", img.src);
+                });
+
+                //const label = html.span({ class: "pen-filename" }, [fileName]);
+                const item = html.div({ class: "pen-item" }, [img, /*label*/]);
+
+                penDiv.appendChild(item);
+              });
+            }
+
+            function stripExtension(n){
+              return n.split('.').slice(0,-1).join('.');
+            }
     </script>
   </body>
 </html>

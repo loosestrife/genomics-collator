@@ -1,16 +1,18 @@
 from collections import defaultdict
 from numpy import object_
 import os
+import json
 import traceback
 from typing import List, Optional
 import duckdb
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 import sqlite3
 import ollama
+import asyncio
 
 app = FastAPI(title="NCBI Orthologs FastAPI Server")
 
@@ -160,6 +162,8 @@ def getOrthologs(
 ) -> dict:
     
     BASE_QUERY = """
+    SET enable_progress_bar = true;
+    SET memory_limit = '1GB';
     WITH species_a_genes AS (
     SELECT
       g.protein_id AS protein_id_a, 
@@ -647,118 +651,80 @@ def extract_base64_file_data(data_url_string: str) -> str:
 
 @app.post("/orthologs")
 async def process_orthologs(payload: OrthologsRequest):
-    print("received call to /orthologs endpoint. Selected database:", payload.database)
-    organisms = [payload.image1, payload.image2]
-    if payload.imageX:
-        organisms.append(payload.imageX)
-    try:
+    async def event_generator():
+        organisms = [payload.image1, payload.image2]
+        if payload.imageX:
+            organisms.append(payload.imageX)
+
         sdatas = []
+        # Phase 1 Progress: Vision model / Taxonomy lookup
+        yield json.dumps({'step': 'species_identification'}) + "\n\n"
+
         for organism in organisms:
             if organism.species:
                 sdatas.append({"scientificName": organism.species})
             else:
-                print('determining species from image... ... ...')
-                ollama_response_schema = {
-                    "type": "object",
-                    "properties": {
-                        "scientificName": { 
-                            "type": "string", 
-                            "description": 'The clean Genus species name only, formatted as "Genus species".' 
-                        },
-                        "impressions": { 
-                            "type": "string", 
-                            "description": "Your freeform thoughts, observations, and context about the specimen." 
-                        }
-                    },
-                    "required": ["scientificName", "impressions"]
-                }
-
                 raw_base64 = extract_base64_file_data(organism.fileData)
                 prompt = "Analyze this image. Break down your response into your freeform impressions, and your final specific scientific taxonomy classification (genus species)."
                 
-                response = ollama.generate(
+                # Run sync Ollama call in thread so loop stays alive
+                response = await asyncio.to_thread(
+                    ollama.generate,
                     model='qwen2.5vl',
                     prompt=prompt,
                     images=[raw_base64],
-                    format=ollama_response_schema,
+                    format={
+                        "type": "object",
+                        "properties": {
+                            "scientificName": {"type": "string"},
+                            "impressions": {"type": "string"}
+                        },
+                        "required": ["scientificName", "impressions"]
+                    }
                 )
-                print(response)
-                
-                import json
                 sdatas.append(json.loads(response.response))
 
         for sdata in sdatas:
             sdata['scientificName'] = sdata['scientificName'].capitalize()
-        print("got names", sdatas)
 
-        db_results = []
+        yield json.dumps({'step': 'lineage_resolution'}) + "\n\n"
+
         extras = {}
-        # Explicit routing based on frontend payload choice
+        odb_name_mapping = {
+            "Dictyostelium discoideum": "Dictyostelium discoideum AX4",
+            "Gorilla gorilla": "Gorilla gorilla gorilla"
+        }
+        def odbName(name):
+            return odb_name_mapping.get(name, name)
+
+        # Execute DuckDB tasks with active progress polling
         if payload.database == 'ncbi':
+            # SQLite non-progress fallback
+            yield json.dumps({'step': 'querying_sqlite'})+"\n\n"
             with sqlite3.connect(NCBI_DB_PATH) as conn:
                 conn.row_factory = sqlite3.Row  
                 cursor = conn.cursor()
                 cursor.execute(ORTHOLOGS_QUERY_TEXT, (f"%{sdatas[0]['scientificName']}%", f"%{sdatas[0]['scientificName']}%"))
-                rows = cursor.fetchall()
-                db_results = [dict(row) for row in rows]
+                db_results = [dict(row) for row in cursor.fetchall()]
         else:
-            search_query = payload.search or ""
-            search_pattern = f"%{search_query}%"
-            
             with duckdb.connect(NCBI_DB_PATH, read_only=True) as conn:
-                inspect_duckdb(conn)
                 for sdata in sdatas:
                     sdata['lineage'] = getLineage(sdata['scientificName'], conn)
+                    yield json.dumps({"step": "lineage", "lineage": sdata['lineage']}, indent=2) + "\n\n"
                 lin1 = sdatas[0]['lineage'][::-1]
                 lin2 = sdatas[1]['lineage'][::-1]
-                shared_nodes = []
-                for node_a, node_b in zip(lin1, lin2):
-                    if node_a == node_b:
-                        shared_nodes.append(node_a)
-                    else:
-                        break  # Stop as soon as the lineage trees diverge!
+                shared_nodes = [a for a, b in zip(lin1, lin2) if a == b]
                 extras['mrca'] = shared_nodes[-1] if shared_nodes else None
-                print("MCRA calculation", sdatas[0]['scientificName'], sdatas[1]['scientificName'], extras['mrca'])
-                if len(sdatas)>2:
-                    lin3 = sdatas[2]['lineage'][::-1]
+                yield json.dumps({"step": "mrca", "mrca": extras['mrca']})
 
-                    # MRCA of all three
-                    mrca_all = []
-                    for a, b, c in zip(lin1, lin2, lin3):
-                        if a == b == c:
-                            mrca_all.append(a)
-                        else:
-                            break
-                    extras['mrcall'] = mrca_all[-1] if mrca_all else None
-
-                    # MRCA of Species 1 & Species 2
-                    mrca_12 = []
-                    for a, b in zip(lin1, lin2):
-                        if a == b:
-                            mrca_12.append(a)
-                        else:
-                            break
-                            
-                    # Include all common nodes between 1 & 2 that are NOT shared with species 3
-                    extras['mrclist'] = [
-                        node for node in mrca_12 if node not in mrca_all
-                    ] + ([extras['mrcall']] if extras['mrcall'] else [])
-                    
-
-            odb_name_mapping = {
-                "Dictyostelium discoideum": "Dictyostelium discoideum AX4",
-                "Gorilla gorilla": "Gorilla gorilla gorilla"
-            }
-            def odbName(name):
-                return odb_name_mapping[name] if name in odb_name_mapping else name
-
+            # 2. Main Query Execution with Progress Tracking
             with duckdb.connect(ORTHODB_DB_PATH, read_only=True) as conn:
-                inspect_duckdb(conn)
                 taxid_to_name = {}
                 for sdata in sdatas:
                     sdata['gene_count'] = species_gene_count(odbName(sdata['scientificName']), conn)
-                    for n,s in sdata['lineage']:
+                    for n, s in sdata['lineage']:
                         taxid_to_name[n] = s
+
                 extras['odb_mrca'] = odb_mrca(
                     conn,
                     odbName(sdatas[0]['scientificName']), 
@@ -766,57 +732,54 @@ async def process_orthologs(payload: OrthologsRequest):
                     sdatas[0]['lineage'],
                     taxid_to_name
                 )
-                if(len(sdatas) > 2):
+
+                if len(sdatas) > 2:
                     extras['odb_mrcall'] = odb_mrcall(
                         conn,
-                        [
-                            odbName(sdatas[0]['scientificName']), 
-                            odbName(sdatas[1]['scientificName']),
-                            odbName(sdatas[2]['scientificName'])
-                        ],
+                        [odbName(s['scientificName']) for s in sdatas],
                         sdatas[0]['lineage'],
                         taxid_to_name
                     )
-                    db_results = getLocalSimilarities(
+                    target_fn = lambda: getLocalSimilarities(
                         odbName(sdatas[0]['scientificName']),
                         odbName(sdatas[1]['scientificName']),
                         odbName(sdatas[2]['scientificName']),
                         extras['odb_mrcall'][0],
-                        search_query,
+                        payload.search or "",
                         20000,
-                        conn)
+                        conn
+                    )
                 else:
-                    db_results = getOrthologs(
+                    target_fn = lambda: getOrthologs(
                         odbName(sdatas[0]['scientificName']),
                         odbName(sdatas[1]['scientificName']),
                         extras['odb_mrca'][0],
-                        search_query,
+                        payload.search or "",
                         20000,
                         conn,
-                        taxid_to_name)
+                        taxid_to_name
+                    )
 
-
-        print(f"got {len(db_results)} results from {payload.database}")
-        extras['dbResultsLen'] = len(db_results)
+                task = asyncio.create_task(asyncio.to_thread(target_fn))
+                while not task.done():
+                    yield json.dumps({'step': 'get_orthologs', 'progress': conn.query_progress()})+"\n\n"
+                    await asyncio.sleep(1)  # poll every 200ms
+                db_results = await task
 
         for sdata in sdatas:
             sdata['lineage'] = [line[1] for line in sdata['lineage']]
-        if 'mrclist' in extras:
-            del extras['mrclist']
 
-        return {
+        # Yield Final Payload
+        final_payload = {
+            "type": "result",
             "message": f"Analysis complete using database: {payload.database}",
             "sdatas": sdatas,
             "extras": extras,
             "dbResults": db_results
         }
+        yield json.dumps(final_payload, indent=2)
 
-    except Exception as error:
-        traceback.print_exc()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"error": str(error), "sdatas": sdatas}
-        )
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @app.get("/")
 async def serve_frontend():
